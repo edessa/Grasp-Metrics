@@ -131,27 +131,29 @@ def getBarryPoints(handVerts, linkVerts):#call this for each point, or if loadin
 		distances = centers = normals = []
 		point = linkVerts[i]
 		distances = []   #list of distances between point specified and entire hand
+		minDistance = minCenter = minNormal = 1000
 		for j in range(0, len(handVerts)):
-			distance, center = getDistance(point, handVerts[j][0:3])
-			distances.append(distance) #list of distances
-			centers.append(center)
-			normals.append(handVerts[j][3:6])
-		minDistance = min(list(distances))
-		#print minDistance
-		minDistanceIndex = distances.index(minDistance)
-		minCenter = centers[minDistanceIndex]
-		minNormal = normals[minDistanceIndex]
+			hand_point = handVerts[j][0:3]
+
+			distance, center = getDistance(point, hand_point)
+			if distance < minDistance:
+				minDistance = distance
+				minCenter = hand_point
+				minNormal = handVerts[j][3:6]
+			#	print minCenter
+		centerRet = numpy.concatenate((centerRet, minCenter))
+		surface_norms = numpy.concatenate((surface_norms, minNormal))
 		#print point
 		#print minNormal
 		#print '---'
 	#	triangleBary = handTriangles[minDistanceIndex]
 		#barry_coord = getBarryCoordinates(point, triangleBary)
 		#surface_norm = (getSurfaceNormal(triangleBary)) / numpy.array(numpy.linalg.norm((getSurfaceNormal(triangleBary)))).astype(float)
-		surface_norms.append(minNormal)
 		#barry_coords.append(barry_coord)
 		#triangleBarys.append(triangleBary)
-		centerRet.append(minCenter)
-	return surface_norms, centerRet
+	surface_norms = list(numpy.reshape(surface_norms, (-1,3)))
+	centerRet = list(numpy.reshape(centerRet, (-1,3)))
+	return list(surface_norms), list(centerRet)
 
 def offset_SDF(x,y,z,offset):
 	for i in range(0, len(x)):
@@ -185,10 +187,20 @@ def getManuallyLabelledPoints():
 def getPlane(point, normal, radiusX, radiusY, Nx, Ny): #equation of plane is a*x+b*y+c*z+d=0  [a,b,c] is the normal. Thus, we have to calculate d and we're set
 	d = -1 * numpy.dot(point, normal)
 	minIndex = normal.index(min(normal))
-	n1 = normal[(minIndex+1)%3]
+	n1 = -normal[(minIndex+1)%3]
 	n2 = normal[(minIndex+2)%3]
-	u = ([0, n1, n2])/numpy.linalg.norm([0,n1,n2]) #This is the vector inside the plane, perp. to the normal vector
+	#u = ([0, n2, n1])/numpy.linalg.norm([0,n1,n2]) #This is the vector inside the plane, perp. to the normal vector
+	if normal[0] == 0 and normal[1] == 0:
+		u = [0, 1, 0]
+	else:
+		u = [-normal[1], normal[0], 0]
 	v = numpy.cross(u, normal)
+
+	u = numpy.array(u) / numpy.linalg.norm(u)
+	v = numpy.array(v) / numpy.linalg.norm(v)
+
+	print u
+	print v
 
 	points_in_plane = []
 
@@ -196,7 +208,8 @@ def getPlane(point, normal, radiusX, radiusY, Nx, Ny): #equation of plane is a*x
 	epsilonX = deltaX * 0.5
 	deltaY = radiusY / Ny
 	epsilonY = deltaY * 0.5
-
+	print u
+	print v
 	for y in pylab.frange(-radiusY, radiusY+epsilonY, deltaY): #Epsilon makes sure point count is symmetric and we don't miss points on extremes
 		for x in pylab.frange(-radiusX, radiusX+epsilonX, deltaX):
 			if x*x + y*y < radiusX*radiusY:
@@ -204,11 +217,28 @@ def getPlane(point, normal, radiusX, radiusY, Nx, Ny): #equation of plane is a*x
 
 	return points_in_plane
 
+def transformPoint(T, point):
+	return numpy.matmul(T, (list(point) + [1]))
+
+def transformNormal(T, normal):
+	return numpy.matmul(numpy.transpose(numpy.linalg.inv(T)), list(normal) + [0])
+
 
 def getGridOnHand(robot, hand_links, centerRet, surface_norms):
+	all_hand_points = []
+	print centerRet
 	for i in range(0, len(hand_links)):
-		Tlocal = hand_links.GetTransform()
-
+		Tlocal = robot.GetLink(hand_links[i]).GetTransform()
+		point_transformed = list(transformPoint(Tlocal, centerRet[i])[0:3])
+		normal_transformed = list(transformNormal(Tlocal, surface_norms[i])[0:3])
+		points = getPlane(point_transformed, normal_transformed, 0.02, 0.01, 5, 5)
+		print robot.GetLink(hand_links[i])
+		for j in range(0, len(points)):
+			point_hand_frame = [points[j][0], points[j][1], points[j][2]]
+			print transformPoint(numpy.linalg.inv(Tlocal), point_hand_frame)[0:3]
+			all_hand_points.append(transformPoint(numpy.linalg.inv(Tlocal), point_hand_frame)[0:3])
+	print len(all_hand_points)
+	return all_hand_points
 
 env = openravepy.Environment()
 robot = loadRobot(env)
@@ -232,7 +262,7 @@ surface_norms, centerRet = getBarryPoints(robot_hand_verts, point_verts)
 
 
 points_in_hand_plane = getGridOnHand(robot, hand_points.keys(), centerRet, surface_norms)
-points_in_plane = getPlane(centerRet[0], surface_norms[0], 0.01, 0.01, 3, 5) #Need to make this plane projection in the frame of whatever link we have (add link parameter, transform points)
+#points_in_plane = getPlane(centerRet[0], surface_norms[0], 0.01, 0.01, 3, 5) #Need to make this plane projection in the frame of whatever link we have (add link parameter, transform points)
 
 bounding_item = bounding_box(item)
 field, bounds, extent, spacing = processVTI()
