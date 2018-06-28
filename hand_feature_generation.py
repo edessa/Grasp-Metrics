@@ -4,6 +4,7 @@ import numpy
 import math
 import time
 import sys
+import ast
 import vtk
 
 
@@ -52,25 +53,47 @@ def loadObject(env):
     env.Load('/home/eadom/NearContactStudy/InterpolateGrasps/models/stl_files/SprayBottle.STL', {'scalegeometry':'0.001'})
     return env.GetBodies()[1]
 
+def transform(points, localT):
+	for i in range(0, len(points)):
+		points[i][0] += localT[0][3]
+		points[i][1] += localT[1][3]
+		points[i][2] += localT[2][3]
+	return points
+
 def getVerts(surface):
-    link_geom = surface.GetGeometries()[0]
-    link_tris = link_geom.GetCollisionMesh()
-    verts = link_tris.vertices.tolist()
+    link_geom = surface.GetGeometries()
+    verts = []
+    for i in range(0, len(link_geom)):
+	info = link_geom[i].GetInfo()
+	localT = info._t
+    	link_tris = link_geom[i].GetCollisionMesh()
+    	verts += transform(link_tris.vertices.tolist(), localT)
     return verts
+
+#def getVerts(surface):
+#	return surface.GetCollisionData().vertices.tolist()
 
 def surfaces():
     return [robot.GetLinks()[7], robot.GetLinks()[6],  robot.GetLinks()[12],  robot.GetLinks()[13],  robot.GetLinks()[14], item.GetLinks()[0]]
 
+#def getRobotVerts(robot):
+#	verts = []
+#	for i in range(0, len(robot.GetLinks())):
+#		print robot.GetLinks()[i]
+#		print len(getVerts(robot.GetLinks()[i]))
+#		verts += getVerts(robot.GetLinks()[i])
+#	print len(verts)
+#	return verts
+
 def getRobotVerts(robot):
-	verts = []
-	for i in range(0, len(robot.GetLinks())):
-		verts += getVerts(robot.GetLinks()[i])
-	return verts
+	b = numpy.loadtxt('RobotHand.out', dtype=float)
+	return list(numpy.reshape(b, (-1,6)))
 
 def getDistance(point, triangle): #Barrycentric coordinates are 0.5,0.5,0.5 so we can just compute distance between center of triangle and point
-	center = [(triangle[0] + triangle[3] + triangle[6])/3, (triangle[1] + triangle[4] + triangle(7))/3, (triangle[2] + triangle[5] + triangle[8])/3]
-	distance = math.sqrt((point[0]-center[0])^2 + (point[1] - center[1])^2 + (point[2] - center[2])^2)
-	return distance
+	#center = [(triangle[0] + triangle[3] + triangle[6])/3, (triangle[1] + triangle[4] + triangle[7])/3, (triangle[2] + triangle[5] + triangle[8])/3]
+	center = [triangle[0], triangle[1], triangle[2]]
+	distance = math.sqrt((point[0]-center[0])**2 + (point[1] - center[1])**2 + (point[2] - center[2])**2)
+	return distance, center
 
 def getBarryCoordinates(point, triangle):
 	point1 = triangle[0:3]
@@ -101,21 +124,35 @@ def getSurfaceNormal(triangle):
 	Nz = U[0]*V[1] - U[1]*V[0]
 	return [Nx, Ny, Nz]
 
-def getBarryPoints(handVerts, linkVert):#call this for each point, or if loading multiple points through linkVerts
-	distances = norms_barry_triangles = []						 #then change return to append
-	handTriangles = numpy.reshape(handVerts, (-1,9))
-	point = linkVert #single point sampled in txt file, for palm, finger, etc
+def getBarryPoints(handVerts, linkVerts):#call this for each point, or if loading multiple points through linkVerts
+	norms_barry_triangles = surface_norms = barry_coords = triangleBarys = centerRet  = []						 #then change return to append
+	print len(handVerts)
 	for i in range(0, len(linkVerts)):
+		distances = centers = normals = []
+		point = linkVerts[i]
 		distances = []   #list of distances between point specified and entire hand
-		for j in range(0, len(handTriangles)):
-			distances.append(getDistance(point, handTriangles[j])) #list of distances
-		minDistance = min(distances)
+		for j in range(0, len(handVerts)):
+			distance, center = getDistance(point, handVerts[j][0:3])
+			distances.append(distance) #list of distances
+			centers.append(center)
+			normals.append(handVerts[j][3:6])
+		minDistance = min(list(distances))
+		print minDistance
 		minDistanceIndex = distances.index(minDistance)
-		triangleBary = handTriangles[minDistanceIndex]
-		barry_coords = getBarryCoordinates(point, triangleBary)
-		surface_norm = numpy.linalg.norm(getSurfaceNormal(triangleBary))
-		norms_barry_triangles.append(surface_norm, barry_coords, triangleBary)
-	return norms_barry_triangles
+		minCenter = centers[minDistanceIndex]
+		minNormal = normals[minDistanceIndex]
+		print minCenter
+		print point
+		print minNormal
+		print '---'
+	#	triangleBary = handTriangles[minDistanceIndex]
+		#barry_coord = getBarryCoordinates(point, triangleBary)
+		#surface_norm = (getSurfaceNormal(triangleBary)) / numpy.array(numpy.linalg.norm((getSurfaceNormal(triangleBary)))).astype(float)
+		surface_norms.append(minNormal)
+		#barry_coords.append(barry_coord)
+		#triangleBarys.append(triangleBary)
+		centerRet.append(minCenter)
+	return surface_norms, centerRet
 
 def offset_SDF(x,y,z,offset):
 	for i in range(0, len(x)):
@@ -141,28 +178,63 @@ def centerItem(item, bounds):
 	offsetTransform(item, offset)
 	return lower_bound, upper_bound
 
-def computeNormalGrid(grid, extent, step):
-	normal_grid = numpy.array((extent[1],extent[3],extent[5])) - numpy.array((extent[0],extent[2],extent[4])) + 1
-	xshape = numpy.array((extent[1],extent[3],extent[5])) - numpy.array((extent[0],extent[2],extent[4])) + 1
-	xshape_rev = xshape[-1::-1]
-	x = numpy.zeros(xshape_rev,numpy.float32)
-	for zi in range(xshape[2]):
-	    for yi in range(xshape[1]):
-	        for xi in range(xshape[0]):
-				center = grid[z,y,x]
-				zUp = grid[z+1, y, x]
-				zDown = grid[z-1,y, x]
-				yUp = grid[z, y+1, x]
-				yDown = grid[z,y-1, x]
-				xUp = grid[z, y, x+1]
-				xDown = grid[z,y, x-1]
+def getManuallyLabelledPoints():
+	hand_points = {'handbase': '[0.00432584, 0.000212848, 0.09496]', 'Finger2-1': '[-0.0894092, 0.00154199, 0.1048]' , 'Finger2-2': '[-0.132307, 0.003609,  0.117]', 'Finger1-1': '[0.0882787, 0.0254203, 0.104]', 'Finger1-2':'[0.128, 0.025, 0.115]', 'Finger0-1' : '[0.0889559, -0.0254208,  0.104]', 'Finger0-2' : '[0.128, -0.0246, 0.116]'}
+	return hand_points
+
+#N is the number of points in 1 direction
+def getPlane(point, normal, radiusX, radiusY, N): #equation of plane is a*x+b*y+c*z+d=0  [a,b,c] is the normal. Thus, we have to calculate d and we're set
+	d = -1 * numpy.dot(point, normal)
+	min = normal.index(min(normal))
+	n1 = normal[(min+1)%3]
+	n2 = normal[(min+2)%3]
+	u = ([0, n1, n2])/numpy.linalg.norm([0,n1,n2]) #This is the vector inside the plane, perp. to the normal vector
+	v = numpy.cross(u, normal)
+
+	points_in_plane = []
+
+	deltaX = radiusX / N
+	epsilonX = deltaX * 0.5
+	deltaY = radiusY / N
+	epsilonY = deltaY * 0.5
+
+	for y in range(-radiusY, radiusY+epsilonY, deltaY): #Epsilon makes sure point count is symmetric and we don't miss points on extremes
+		for x in range(-radiusX, radiusX+epsilonX, deltaX):
+			if x*x + y*y < radiusX*radiusY:
+				points_in_plane.append(point + x*u + y*v)
+
+	return points_in_plane
+
+
 
 env = openravepy.Environment()
 robot = loadRobot(env)
 item = loadObject(env)
 
+robot_hand_verts = getRobotVerts(robot)
+hand_points = getManuallyLabelledPoints()
+
+
+
+point_verts = []
+for i in range(0, len(hand_points)):
+	point_verts.append(ast.literal_eval(hand_points[hand_points.keys()[i]]))
+
+min = 1000
+for i in range(0, len(robot_hand_verts)):#
+	dist = math.sqrt((robot_hand_verts[i][0]-point_verts[0][0])**2 + (robot_hand_verts[i][1] - point_verts[0][1])**2 + (robot_hand_verts[i][2] - point_verts[0][2])**2)#
+	if dist < min:#
+		min = dist
+
+surface_norms, centerRet = getBarryPoints(robot_hand_verts, point_verts)
+
+#print centerRet
+#print point_verts
+points_in_plane = getPlane(centerRet[0], surface_norms[0], 0.01, 0.01, 20) #Need to make this plane projection in the frame of whatever link we have (add link parameter, transform points)
+
 bounding_item = bounding_box(item)
 field, bounds, extent, spacing = processVTI()
+gx, gy, gz = numpy.gradient(field)
 
 lower_bound, upper_bound = centerItem(item, bounds)
 
@@ -193,7 +265,6 @@ zGridCoord = lower_bound[2] + spacing[2] * index3
 
 signed_distance_function_distance = field[index3, index2, index1]
 point_to_grid_distance = math.sqrt((point[0] - xGridCoord)**2 + (point[1] - yGridCoord)**2 + (point[2] - zGridCoord)**2)
-
 point_to_mesh_distance = math.sqrt(signed_distance_function_distance**2 + point_to_grid_distance**2)
 
 #x, y, z = offset_SDF(x, y, z, offset1)
