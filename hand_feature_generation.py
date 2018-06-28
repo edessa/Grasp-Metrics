@@ -6,7 +6,7 @@ import time
 import sys
 import ast
 import vtk
-
+import pylab
 
 def processVTI():
 	filename = '/home/eadom/NearContactStudy/InterpolateGrasps/models/stl_files/SprayBottle.vti'
@@ -137,14 +137,13 @@ def getBarryPoints(handVerts, linkVerts):#call this for each point, or if loadin
 			centers.append(center)
 			normals.append(handVerts[j][3:6])
 		minDistance = min(list(distances))
-		print minDistance
+		#print minDistance
 		minDistanceIndex = distances.index(minDistance)
 		minCenter = centers[minDistanceIndex]
 		minNormal = normals[minDistanceIndex]
-		print minCenter
-		print point
-		print minNormal
-		print '---'
+		#print point
+		#print minNormal
+		#print '---'
 	#	triangleBary = handTriangles[minDistanceIndex]
 		#barry_coord = getBarryCoordinates(point, triangleBary)
 		#surface_norm = (getSurfaceNormal(triangleBary)) / numpy.array(numpy.linalg.norm((getSurfaceNormal(triangleBary)))).astype(float)
@@ -183,28 +182,32 @@ def getManuallyLabelledPoints():
 	return hand_points
 
 #N is the number of points in 1 direction
-def getPlane(point, normal, radiusX, radiusY, N): #equation of plane is a*x+b*y+c*z+d=0  [a,b,c] is the normal. Thus, we have to calculate d and we're set
+def getPlane(point, normal, radiusX, radiusY, Nx, Ny): #equation of plane is a*x+b*y+c*z+d=0  [a,b,c] is the normal. Thus, we have to calculate d and we're set
 	d = -1 * numpy.dot(point, normal)
-	min = normal.index(min(normal))
-	n1 = normal[(min+1)%3]
-	n2 = normal[(min+2)%3]
+	minIndex = normal.index(min(normal))
+	n1 = normal[(minIndex+1)%3]
+	n2 = normal[(minIndex+2)%3]
 	u = ([0, n1, n2])/numpy.linalg.norm([0,n1,n2]) #This is the vector inside the plane, perp. to the normal vector
 	v = numpy.cross(u, normal)
 
 	points_in_plane = []
 
-	deltaX = radiusX / N
+	deltaX = radiusX / Nx
 	epsilonX = deltaX * 0.5
-	deltaY = radiusY / N
+	deltaY = radiusY / Ny
 	epsilonY = deltaY * 0.5
 
-	for y in range(-radiusY, radiusY+epsilonY, deltaY): #Epsilon makes sure point count is symmetric and we don't miss points on extremes
-		for x in range(-radiusX, radiusX+epsilonX, deltaX):
+	for y in pylab.frange(-radiusY, radiusY+epsilonY, deltaY): #Epsilon makes sure point count is symmetric and we don't miss points on extremes
+		for x in pylab.frange(-radiusX, radiusX+epsilonX, deltaX):
 			if x*x + y*y < radiusX*radiusY:
 				points_in_plane.append(point + x*u + y*v)
 
 	return points_in_plane
 
+
+def getGridOnHand(robot, hand_links, centerRet, surface_norms):
+	for i in range(0, len(hand_links)):
+		Tlocal = hand_links.GetTransform()
 
 
 env = openravepy.Environment()
@@ -220,21 +223,20 @@ point_verts = []
 for i in range(0, len(hand_points)):
 	point_verts.append(ast.literal_eval(hand_points[hand_points.keys()[i]]))
 
-min = 1000
-for i in range(0, len(robot_hand_verts)):#
-	dist = math.sqrt((robot_hand_verts[i][0]-point_verts[0][0])**2 + (robot_hand_verts[i][1] - point_verts[0][1])**2 + (robot_hand_verts[i][2] - point_verts[0][2])**2)#
-	if dist < min:#
-		min = dist
 
 surface_norms, centerRet = getBarryPoints(robot_hand_verts, point_verts)
 
 #print centerRet
 #print point_verts
-points_in_plane = getPlane(centerRet[0], surface_norms[0], 0.01, 0.01, 20) #Need to make this plane projection in the frame of whatever link we have (add link parameter, transform points)
+
+
+
+points_in_hand_plane = getGridOnHand(robot, hand_points.keys(), centerRet, surface_norms)
+points_in_plane = getPlane(centerRet[0], surface_norms[0], 0.01, 0.01, 3, 5) #Need to make this plane projection in the frame of whatever link we have (add link parameter, transform points)
 
 bounding_item = bounding_box(item)
 field, bounds, extent, spacing = processVTI()
-gx, gy, gz = numpy.gradient(field)
+#gx, gy, gz = numpy.gradient(field)
 
 lower_bound, upper_bound = centerItem(item, bounds)
 
