@@ -210,10 +210,10 @@ def getPlane(point, normal, radiusX, radiusY, Nx, Ny): #equation of plane is a*x
 	epsilonY = deltaY * 0.5
 	print u
 	print v
+	print point
 	for y in pylab.frange(-radiusY, radiusY+epsilonY, deltaY): #Epsilon makes sure point count is symmetric and we don't miss points on extremes
 		for x in pylab.frange(-radiusX, radiusX+epsilonX, deltaX):
-			if x*x + y*y < radiusX*radiusY:
-				points_in_plane.append(point + x*u + y*v)
+			points_in_plane.append(point + x*u + y*v)
 
 	return points_in_plane
 
@@ -223,20 +223,27 @@ def transformPoint(T, point):
 def transformNormal(T, normal):
 	return numpy.matmul(numpy.transpose(numpy.linalg.inv(T)), list(normal) + [0])
 
-
 def getGridOnHand(robot, hand_links, centerRet, surface_norms):
 	all_hand_points = []
 	print centerRet
 	for i in range(0, len(hand_links)):
 		Tlocal = robot.GetLink(hand_links[i]).GetTransform()
 		point_transformed = list(transformPoint(Tlocal, centerRet[i])[0:3])
+		print surface_norms[i][0:3]
 		normal_transformed = list(transformNormal(Tlocal, surface_norms[i])[0:3])
-		points = getPlane(point_transformed, normal_transformed, 0.02, 0.01, 5, 5)
+		if hand_links[i] == 'handbase':
+			print "HI"
+			points = getPlane(point_transformed, normal_transformed, 0.04,0.013, 5, 5)
+		else:
+			points = getPlane(point_transformed, normal_transformed, 0.03, 0.006, 5, 5)
 		print robot.GetLink(hand_links[i])
+		link_points = []
 		for j in range(0, len(points)):
 			point_hand_frame = [points[j][0], points[j][1], points[j][2]]
 			print transformPoint(numpy.linalg.inv(Tlocal), point_hand_frame)[0:3]
-			all_hand_points.append(transformPoint(numpy.linalg.inv(Tlocal), point_hand_frame)[0:3])
+			link_points.append(transformPoint(numpy.linalg.inv(Tlocal), point_hand_frame)[0:3])
+		all_hand_points.append(link_points)
+
 	print len(all_hand_points)
 	return all_hand_points
 
@@ -262,42 +269,46 @@ surface_norms, centerRet = getBarryPoints(robot_hand_verts, point_verts)
 
 
 points_in_hand_plane = getGridOnHand(robot, hand_points.keys(), centerRet, surface_norms)
-#points_in_plane = getPlane(centerRet[0], surface_norms[0], 0.01, 0.01, 3, 5) #Need to make this plane projection in the frame of whatever link we have (add link parameter, transform points)
-
 bounding_item = bounding_box(item)
 field, bounds, extent, spacing = processVTI()
 #gx, gy, gz = numpy.gradient(field)
-
 lower_bound, upper_bound = centerItem(item, bounds)
 
-point = [1,1,1] #This is the point that is used for distance to mesh calculation
+distances = []
 
-index1 = extent[1] * (point[0] - lower_bound[0])/(upper_bound[0] - lower_bound[0])
-index2 = extent[3] * (point[1] - lower_bound[1])/(upper_bound[1] - lower_bound[1])
-index3 = extent[5] * (point[2] - lower_bound[2])/(upper_bound[2] - lower_bound[2])
+for i in range(0, len(points_in_hand_plane)):
+	distance_link = []
+	for j in range(0, len(points_in_hand_plane[i])):
+		point = points_in_hand_plane[i][j]
+		index1 = extent[1] * (point[0] - lower_bound[0])/(upper_bound[0] - lower_bound[0])
+		index2 = extent[3] * (point[1] - lower_bound[1])/(upper_bound[1] - lower_bound[1])
+		index3 = extent[5] * (point[2] - lower_bound[2])/(upper_bound[2] - lower_bound[2])
 
-if index1 > extent[1]:
-	index1 = extent[1]
-if index1 < 0:
-	index1 = 0
+		if index1 > extent[1]:
+			index1 = extent[1]
+		if index1 < 0:
+			index1 = 0
 
-if index2 > extent[3]:
-	index2 = extent[3]
-if index2 < 0:
-	index2 = 0
+		if index2 > extent[3]:
+			index2 = extent[3]
+		if index2 < 0:
+			index2 = 0
 
-if index3 > extent[5]:
-	index3 = extent[5]
-if index3 < 0:
-	index3 = 0
+		if index3 > extent[5]:
+			index3 = extent[5]
+		if index3 < 0:
+			index3 = 0
 
-xGridCoord = lower_bound[0] + spacing[0] * index1
-yGridCoord = lower_bound[1] + spacing[1] * index2
-zGridCoord = lower_bound[2] + spacing[2] * index3
+		xGridCoord = lower_bound[0] + spacing[0] * index1
+		yGridCoord = lower_bound[1] + spacing[1] * index2
+		zGridCoord = lower_bound[2] + spacing[2] * index3
 
-signed_distance_function_distance = field[index3, index2, index1]
-point_to_grid_distance = math.sqrt((point[0] - xGridCoord)**2 + (point[1] - yGridCoord)**2 + (point[2] - zGridCoord)**2)
-point_to_mesh_distance = math.sqrt(signed_distance_function_distance**2 + point_to_grid_distance**2)
+		signed_distance_function_distance = field[index3, index2, index1]
+		point_to_grid_distance = math.sqrt((point[0] - xGridCoord)**2 + (point[1] - yGridCoord)**2 + (point[2] - zGridCoord)**2)
+		point_to_mesh_distance = math.sqrt(signed_distance_function_distance**2 + point_to_grid_distance**2)
+		distance_link.append(point_to_mesh_distance)
+	distances.append(distance_link)
+
 
 #x, y, z = offset_SDF(x, y, z, offset1)
 
