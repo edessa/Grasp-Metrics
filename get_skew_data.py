@@ -73,15 +73,17 @@ def get_positions_wrt_obj(item, filename, distance, skew, step):
 
 	return transforms_aligned, transforms_skewed
 
-def collectData():
+#collectData('SprayBottle')
+#collectData('CerealBox')
+def collectData(obj_name):
 	env = openravepy.Environment()
 	robot = loadRobot(env)
-	item = loadObject(env)
-	transforms_aligned, transforms_skewed = get_positions_wrt_obj(item, 'SprayBottle.out', 0.13, 0.1, 10)
+	item = loadObject(env, obj_name)
+	transforms_aligned, transforms_skewed = get_positions_wrt_obj(item, obj_name + '.out', 0.13, 0.1, 20)
 	for i in range(0, len(transforms_aligned)):
 		robot.SetTransform(transforms_aligned[i])
-		generateHandFeatures('./aligned_data/Transforms_Aligned' + str(i) + '.out', robot, item)
+		generateHandFeatures('./aligned_data/Transforms_Aligned' + str(i) + '.out', robot, item, obj_name)
 
 	for j in range(0, len(transforms_skewed)):
 		robot.SetTransform(transforms_skewed[j])
-		generateHandFeatures('./skewed_data/Transforms_Skewed' + str(j) + '.out', robot, item)
+		generateHandFeatures('./skewed_data/Transforms_Skewed' + str(j) + '.out', robot, item, obj_name)

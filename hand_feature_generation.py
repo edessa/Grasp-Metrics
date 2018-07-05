@@ -11,11 +11,11 @@ import vtk
 
 
 def loadRobot(env):
-	env.Load('/home/eadom/Grasp-Metrics/barretthand.robot.xml')
+	env.Load('./barretthand.robot.xml')
 	return env.GetRobots()[0]
 
-def loadObject(env):
-    env.Load('/home/eadom/Grasp-Metrics/SprayBottle.STL', {'scalegeometry':'0.001'})
+def loadObject(env, obj_name):
+    env.Load('./' + obj_name + '.STL', {'scalegeometry':'0.001'})
     return env.GetBodies()[1]
 
 def transform(points, localT):
@@ -51,7 +51,7 @@ def surfaces():
 #	return verts
 
 def getRobotVerts(robot):
-	b = numpy.loadtxt('RobotHand.out', dtype=float)
+	b = numpy.loadtxt('./RobotHand.out', dtype=float)
 	b = list(numpy.reshape(b, (-1,6)))
 	transformed_points = []
 	for point in b:
@@ -155,8 +155,8 @@ def getManuallyLabelledPoints():
 	hand_points = {'handbase': '[0.00432584, 0.000212848, 0.09496]', 'Finger2-1': '[-0.0894092, 0.00154199, 0.1048]' , 'Finger2-2': '[-0.132307, 0.003609,  0.117]', 'Finger1-1': '[0.0882787, 0.0254203, 0.104]', 'Finger1-2':'[0.128, 0.025, 0.115]', 'Finger0-1' : '[0.0889559, -0.0254208,  0.104]', 'Finger0-2' : '[0.128, -0.0246, 0.116]'}
 	return hand_points
 
-def processVTI():
-	filename = '/home/eadom/Grasp-Metrics/SprayBottle.vti'
+def processVTI(obj_name):
+	filename = './' + obj_name + '.vti'
 	r = vtk.vtkXMLImageDataReader()
 	r.SetFileName(filename)
 	r.Update()
@@ -270,7 +270,7 @@ def bounding_box(item):
 	min_xyz = obj.pos()-obj.extents()
 	return min_xyz, max_xyz
 
-def generateHandFeatures(filename, robot, item):
+def generateHandFeatures(filename, robot, item, item_name):
 	robot_hand_verts = getRobotVerts(robot)
 	hand_points = getManuallyLabelledPoints()
 
@@ -282,7 +282,7 @@ def generateHandFeatures(filename, robot, item):
 
 	points_in_hand_plane = getGridOnHand(robot, hand_points.keys(), centerRet, surface_norms)
 	bounding_item = bounding_box(item)
-	field, bounds, extent, spacing = processVTI()
+	field, bounds, extent, spacing = processVTI(item_name)
 	gx, gy, gz = numpy.gradient(field)
 	lower_bound, upper_bound = centerItem(item, bounds, bounding_item)
 
