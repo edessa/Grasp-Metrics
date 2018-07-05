@@ -4,8 +4,9 @@ import math
 import time
 import ast
 import pylab
-import vtk_process
 import get_skew_data
+import vtk
+
 
 
 
@@ -51,7 +52,13 @@ def surfaces():
 
 def getRobotVerts(robot):
 	b = numpy.loadtxt('RobotHand.out', dtype=float)
-	return list(numpy.reshape(b, (-1,6)))
+	b = list(numpy.reshape(b, (-1,6)))
+	transformed_points = []
+	for point in b:
+		transformed_pt = transformPoint(robot.GetTransform(), point[0:3])
+		transformed_nm = transformNormal(robot.GetTransform(), point[3:6])
+		transformed_points.append([transformed_pt[0], transformed_pt[1], transformed_pt[2], transformed_nm[0], transformed_nm[1], transformed_nm[2]])
+	return transformed_points
 
 def getDistance(point, triangle): #Barrycentric coordinates are 0.5,0.5,0.5 so we can just compute distance between center of triangle and point
 	#center = [(triangle[0] + triangle[3] + triangle[6])/3, (triangle[1] + triangle[4] + triangle[7])/3, (triangle[2] + triangle[5] + triangle[8])/3]
@@ -119,6 +126,7 @@ def getBarryPoints(handVerts, linkVerts):#call this for each point, or if loadin
 	centerRet = list(numpy.reshape(centerRet, (-1,3)))
 	return list(surface_norms), list(centerRet)
 
+
 def offset_SDF(x,y,z,offset):
 	for i in range(0, len(x)):
 		x[i] -= offset[0]
@@ -146,6 +154,38 @@ def centerItem(item, bounds, bounding_item):
 def getManuallyLabelledPoints():
 	hand_points = {'handbase': '[0.00432584, 0.000212848, 0.09496]', 'Finger2-1': '[-0.0894092, 0.00154199, 0.1048]' , 'Finger2-2': '[-0.132307, 0.003609,  0.117]', 'Finger1-1': '[0.0882787, 0.0254203, 0.104]', 'Finger1-2':'[0.128, 0.025, 0.115]', 'Finger0-1' : '[0.0889559, -0.0254208,  0.104]', 'Finger0-2' : '[0.128, -0.0246, 0.116]'}
 	return hand_points
+
+def processVTI():
+	filename = '/home/eadom/Grasp-Metrics/SprayBottle.vti'
+	r = vtk.vtkXMLImageDataReader()
+	r.SetFileName(filename)
+	r.Update()
+	data = r.GetOutput()
+	dim = numpy.asarray(data.GetDimensions())
+	dim = [dim[0]/1000.0, dim[1]/1000.0, dim[2]/1000.0]
+	spacing = data.GetSpacing()
+	spacing = [spacing[0]/1000.0, spacing[1]/1000.0, spacing[2]/1000.0]
+	#x = numpy.zeros(data.GetNumberOfPoints())
+	#y = x.copy()
+	#z = x.copy()
+	#Can do data.SetOrigin(data.GetOrigin() blah blah blah)
+	bounds = data.GetBounds()
+	bounds = numpy.array(bounds)/1000
+
+	extent = data.GetExtent()
+
+	pd = data.GetPointData()
+	a = pd.GetArray(0)
+	xshape = numpy.array((extent[1],extent[3],extent[5])) - numpy.array((extent[0],extent[2],extent[4])) + 1
+	xshape_rev = xshape[-1::-1]
+	x = numpy.zeros(xshape_rev,numpy.float32)
+	for zi in range(xshape[2]):
+	    for yi in range(xshape[1]):
+	        for xi in range(xshape[0]):
+	            idx = zi*xshape[0]*xshape[1] + yi*xshape[0] + xi
+		    x[zi,yi,xi] = a.GetValue(idx) / 1000.0
+	return x, bounds, extent, spacing
+
 
 #N is the number of points in 1 direction
 def getPlane(point, normal, radiusX, radiusY, Nx, Ny): #equation of plane is a*x+b*y+c*z+d=0  [a,b,c] is the normal. Thus, we have to calculate d and we're set
@@ -224,6 +264,12 @@ def angle_between(v1, v2):
     v2_u = unit_vector(v2)
     return numpy.arccos(numpy.clip(numpy.dot(v1_u, v2_u), -1.0, 1.0))
 
+def bounding_box(item):
+	obj = item.ComputeAABB()
+	max_xyz =  obj.pos()+obj.extents()
+	min_xyz = obj.pos()-obj.extents()
+	return min_xyz, max_xyz
+
 def generateHandFeatures(filename, robot, item):
 	robot_hand_verts = getRobotVerts(robot)
 	hand_points = getManuallyLabelledPoints()
@@ -236,7 +282,7 @@ def generateHandFeatures(filename, robot, item):
 
 	points_in_hand_plane = getGridOnHand(robot, hand_points.keys(), centerRet, surface_norms)
 	bounding_item = bounding_box(item)
-	field, bounds, extent, spacing = vtk_process.processVTI()
+	field, bounds, extent, spacing = processVTI()
 	gx, gy, gz = numpy.gradient(field)
 	lower_bound, upper_bound = centerItem(item, bounds, bounding_item)
 
@@ -281,10 +327,6 @@ def generateHandFeatures(filename, robot, item):
 
 
 
-env = openravepy.Environment()
-robot = loadRobot(env)
-item = loadObject(env)
-#generateHandFeatures('Robot.out', robot, item)
 
 
 #x, y, z = offset_SDF(x, y, z, offset1)
