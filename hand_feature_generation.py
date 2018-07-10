@@ -6,17 +6,22 @@ import ast
 import pylab
 import get_skew_data
 import vtk
+import matlab.engine
 
-
-
+def generateGeometry(eng, type, parameters):
+	print parameters
+	print type
+	filename = eng.generateShapes(type, [float(parameters[0]), float(parameters[1]), float(parameters[2]), float(parameters[3]), float(parameters[4]), float(parameters[5])], nargout=1) #width, height, extent, alpha, min_d, resolution
+	return filename
 
 def loadRobot(env):
 	env.Load('./barretthand.robot.xml')
 	return env.GetRobots()[0]
 
-def loadObject(env, obj_name):
-    env.Load('./' + obj_name + '.STL', {'scalegeometry':'0.001'})
-    return env.GetBodies()[1]
+def loadObject(env, eng, obj_type, parameters):
+    filename = generateGeometry(eng, obj_type, parameters)
+    env.Load(filename + '.stl')
+    return env.GetBodies()[1], filename
 
 def transform(points, localT):
 	for i in range(0, len(points)):
@@ -24,6 +29,12 @@ def transform(points, localT):
 		points[i][1] += localT[1][3]
 		points[i][2] += localT[2][3]
 	return points
+
+
+def getTransformBetweenLinks(link1, link2):
+    trns1 = link1.GetTransform()
+    trns2 = link2.GetTransform()
+    return numpy.dot(numpy.linalg.inv(trns2),trns1)
 
 def getVerts(surface):
     link_geom = surface.GetGeometries()
@@ -66,66 +77,6 @@ def getDistance(point, triangle): #Barrycentric coordinates are 0.5,0.5,0.5 so w
 	distance = math.sqrt((point[0]-center[0])**2 + (point[1] - center[1])**2 + (point[2] - center[2])**2)
 	return distance, center
 
-def getBarryCoordinates(point, triangle):
-	point1 = triangle[0:3]
-	point2 = triangle[3:6]
-	point3 = triangle[6:9]
-	v0 = point2 - point1
-	v1 = point3 - point1
-	v2 = point - point1
-	d00 = numpy.dot(v0, v0)
-	d01 = numpy.dot(v0, v1)
-	d11 = numpy.dot(v1, v1)
-	d20 = numpy.dot(v2, v0)
-	d21 = numpy.dot(v2, v1)
-	denom = d00 * d11 - d01 * d01
-	B1 = (d11 * d20 - d01 * d21) / denom
-	B2 = (d00 * d21 - d01 * d20) / denom
-	B3 = 1.0 - B1 - B2
-	return [B1, B2, B3]
-
-def getSurfaceNormal(triangle):
-	point1 = triangle[0:3]
-	point2 = triangle[3:6]
-	point3 = triangle[6:9]
-	U = point2 - point1
-	V = point3 - point1
-	Nx = U[1]*V[2] - U[2]*V[1]
-	Ny = U[2]*V[0] - U[0]*V[2]
-	Nz = U[0]*V[1] - U[1]*V[0]
-	return [Nx, Ny, Nz]
-
-def getBarryPoints(handVerts, linkVerts):#call this for each point, or if loading multiple points through linkVerts
-	norms_barry_triangles = surface_norms = barry_coords = triangleBarys = centerRet  = []						 #then change return to append
-	#print len(handVerts)
-	for i in range(0, len(linkVerts)):
-		distances = centers = normals = []
-		point = linkVerts[i]
-		distances = []   #list of distances between point specified and entire hand
-		minDistance = minCenter = minNormal = 1000
-		for j in range(0, len(handVerts)):
-			hand_point = handVerts[j][0:3]
-
-			distance, center = getDistance(point, hand_point)
-			if distance < minDistance:
-				minDistance = distance
-				minCenter = hand_point
-				minNormal = handVerts[j][3:6]
-			#	print minCenter
-		centerRet = numpy.concatenate((centerRet, minCenter))
-		surface_norms = numpy.concatenate((surface_norms, minNormal))
-		#print point
-		#print minNormal
-		#print '---'
-	#	triangleBary = handTriangles[minDistanceIndex]
-		#barry_coord = getBarryCoordinates(point, triangleBary)
-		#surface_norm = (getSurfaceNormal(triangleBary)) / numpy.array(numpy.linalg.norm((getSurfaceNormal(triangleBary)))).astype(float)
-		#barry_coords.append(barry_coord)
-		#triangleBarys.append(triangleBary)
-	surface_norms = list(numpy.reshape(surface_norms, (-1,3)))
-	centerRet = list(numpy.reshape(centerRet, (-1,3)))
-	return list(surface_norms), list(centerRet)
-
 
 def offset_SDF(x,y,z,offset):
 	for i in range(0, len(x)):
@@ -156,7 +107,7 @@ def getManuallyLabelledPoints():
 	return hand_points
 
 def processVTI(obj_name):
-	filename = './' + obj_name + '.vti'
+	filename = obj_name + '.vti'
 	r = vtk.vtkXMLImageDataReader()
 	r.SetFileName(filename)
 	r.Update()
@@ -245,6 +196,36 @@ def getGridOnHand(robot, hand_links, centerRet, surface_norms):
 	#print len(all_hand_points)
 	return all_hand_points
 
+def getBarryPoints(handVerts, linkVerts):#call this for each point, or if loading multiple points through linkVerts
+	norms_barry_triangles = surface_norms = barry_coords = triangleBarys = centerRet  = []						 #then change return to append
+	#print len(handVerts)
+	for i in range(0, len(linkVerts)):
+		distances = centers = normals = []
+		point = linkVerts[i]
+		distances = []   #list of distances between point specified and entire hand
+		minDistance = minCenter = minNormal = 1000
+		for j in range(0, len(handVerts)):
+			hand_point = handVerts[j][0:3]
+
+			distance, center = getDistance(point, hand_point)
+			if distance < minDistance:
+				minDistance = distance
+				minCenter = hand_point
+				minNormal = handVerts[j][3:6]
+			#	print minCenter
+		centerRet = numpy.concatenate((centerRet, minCenter))
+		surface_norms = numpy.concatenate((surface_norms, minNormal))
+		#print point
+		#print minNormal
+		#print '---'
+	#	triangleBary = handTriangles[minDistanceIndex]
+		#barry_coord = getBarryCoordinates(point, triangleBary)
+		#surface_norm = (getSurfaceNormal(triangleBary)) / numpy.array(numpy.linalg.norm((getSurfaceNormal(triangleBary)))).astype(float)
+		#barry_coords.append(barry_coord)
+		#triangleBarys.append(triangleBary)
+	surface_norms = list(numpy.reshape(surface_norms, (-1,3)))
+	centerRet = list(numpy.reshape(centerRet, (-1,3)))
+	return list(surface_norms), list(centerRet)
 
 def unit_vector(vector):
     """ Returns the unit vector of the vector.  """

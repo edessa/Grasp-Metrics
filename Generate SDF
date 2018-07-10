@@ -1,3 +1,0 @@
-Generate SDF :
-./SDFGen /home/eadom/NearContactStudy/InterpolateGrasps/models/stl_files/SprayBottle.obj 1 0
-./SDFGen /home/eadom/NearContactStudy/InterpolateGrasps/models/stl_files/CerealBox.obj 1 0
