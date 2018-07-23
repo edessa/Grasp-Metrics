@@ -1,0 +1,32 @@
+Results:
+  0 to 63
+  test accuracy: 91.86%
+  train accuracy: 90.9%
+
+  9 to 63:
+  test accuracy: 80.82%
+  train accuracy: 80.16%
+
+  0 to 9, 18 to 63:
+  test accuracy: 79.96%
+  train accuracy: 80.31%
+
+  0 to 18, 27 to 63:
+  test accuracy: 90.82%
+  train accuracy: 90.15%
+
+  0 to 27, 36 to 63:
+  test accuracy: 79.14%
+train accuracy: 80.65%
+
+  0 to 36, 45 to 63:
+  test accuracy: 89.54%
+train accuracy: 90.05%
+
+  0 to 45, 54 to 63:
+  test accuracy: 90.0%
+train accuracy: 90.6%
+
+  0 to 54:
+  test accuracy: 89.96%
+train accuracy: 89.35%

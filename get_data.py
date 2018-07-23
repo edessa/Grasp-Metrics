@@ -8,8 +8,7 @@ import random
 from subprocess import call
 from stl2obj import convert
 import stl
-from stl import mesh
-
+import os
 
 def getUniformQuatDistribution(N):
 	rotations = []
@@ -26,13 +25,21 @@ def getUniformQuatDistribution(N):
 		rotations.append([w, x, y, z])
 	return rotations
 
-def getTranslations(N, size):
+def getRPYRotations(nR, nY, nP):
+	rotations = []
+	for roll in pylab.frange(-0.4, 0.4, 0.8/nR):
+		for pitch in pylab.frange(-0.4, 0.4, 0.8/nP):
+			for yaw in pylab.frange(-0.4, 0.4, 0.8/nY):
+				print roll, pitch, yaw
+				rotations.append(rotation_matrix_from_rpy(roll, pitch, yaw))
+	return rotations
+
+def getTranslations(Nx, sizeX, Nz, sizeZ):
 	points = []
-	for x in pylab.frange(-size/2.0, size/2.0, size/float(N)):
-		for z in pylab.frange(-size/2.0, size/2.0, size/float(N)):
+	for x in pylab.frange(-sizeX/2.0, sizeX/2.0, sizeX/float(Nx)):
+		for z in pylab.frange(0, sizeZ, sizeZ/float(Nz)):
 				points.append([x, 0, z])
 	return points
-
 
 def bounding_box(item):
 	obj = item.ComputeAABB()
@@ -66,62 +73,121 @@ def quat_from_rpy(roll, pitch, yaw):
 def rotation_matrix_from_rpy(roll, pitch, yaw):
 	return openravepy.rotationMatrixFromQuat(quat_from_rpy(roll, pitch, yaw))
 
-def sample_obj_transforms():
+def sample_obj_transforms(env, item):
 	transforms = []
-	translations = getTranslations(3, .1)
+	translations = getTranslations(5, .1, 3, .05)
 
 	for trans in translations:
-		uniformly_sampled_rotations = getUniformQuatDistribution(1000)
-		for quat in uniformly_sampled_rotations:
-			R = openravepy.rotationMatrixFromQuat(quat)
+		uniformly_sampled_rotations = getRPYRotations(3, 3, 3)
+		for R in uniformly_sampled_rotations:
 			T_obj = numpy.eye(4)
 			T_obj[0:3,0:3] = R
+			item.SetTransform(T_obj)
+			while env.CheckCollision(item):
+				T_obj = adjustTransform(env, item, T_obj)
 			T_obj[0][3] = trans[0]
 			T_obj[1][3] = trans[1]
-			T_obj[2][3] = -0.3 + trans[2] #depth offset
+			T_obj[2][3] += trans[2] #depth offset
 			transforms.append(T_obj)
 	return transforms
 
-def generateParameters(type, N):
-	parameters = []
+#def generateParameters(type, N):
+#	parameters = []
+#	shapeResolutions = {'cube':10, 'ellipse':100, 'cylinder':25, 'cone':25, 'vase':25}
+#	resolution = shapeResolutions[type]
+#	if type == 'cone':
+#		n = int(N**(1./2.))
+#		for width in pylab.frange(0.05, 0.15, 0.1/n):
+#			for height in pylab.frange(0.05, 0.15, 0.1/n):
+#				parameters.append([width, height, 0.1, 10, 0, resolution])
+#	else:
+#		n = int(N**(1./2.))
+#		for height in pylab.frange(0.05, 0.15, 0.1/n):
+#			for alpha in pylab.frange(10, 40, 30/n):
+#				parameters.append([0.1, height, 0.1, alpha, 0, resolution])
+#	return parameters
+
+def generateParameters(type):
 	shapeResolutions = {'cube':10, 'ellipse':100, 'cylinder':25, 'cone':25, 'vase':25}
 	resolution = shapeResolutions[type]
+	parameters = []
+	if type == 'ellipse':
+		parameters.append([0.1, 0.1, 0.1, 0.1, 0, resolution])
+		parameters.append([0.2, 0.2, 0.2, 0.1, 0, resolution])
+		parameters.append([0.2, 0.2, 0.3, 0.1, 0, resolution])
 	if type == 'cone':
-		n = int(N**(1./2.))
-		for width in pylab.frange(0.05, 0.15, 0.1/n):
-			for height in pylab.frange(0.05, 0.15, 0.1/n):
-				parameters.append([width, height, 0.1, 0, 0, resolution])
-	else:
-		n = int(N**(1./2.))
-		for height in pylab.frange(0.05, 0.15, 0.1/n):
-			for alpha in pylab.frange(10, 40, 30/n):
-				parameters.append([0.1, height, 0.1, alpha, 0, resolution])
+		parameters.append([0.07, 0.07, 0.07, 30, 0, resolution])
+		parameters.append([0.15, 0.15, 0.15, 30, 0, resolution])
+		parameters.append([0.2, 0.2, 0.2, 30, 0, resolution])
+	if type == 'cube':
+		parameters.append([0.05, 0.05, 0.05, 0.05, 0, resolution])
+		parameters.append([0.13, 0.13, 0.13, 0.1, 0, resolution])
+		parameters.append([0.13, 0.13, 0.2, 0.1, 0, resolution])
+	if type == 'cylinder':
+		parameters.append([0.1, 0.2, 0.1, 0.05, 0, resolution])
+		parameters.append([0.2, 0.2, 0.2, 0.05, 0, resolution])
 	return parameters
 
+
 def generateSDF(filename, grid_size, padding):
-	convert(filename + '.stl', filename + '.obj')
-	call(["./SDFGen", str(filename) + '.obj', str(grid_size), str(padding)])
+	convert('./Shapes/' + filename + '.stl', './Shapes/' + filename + '.obj')
+##	if os.path.isfile('./Shapes/' + str(filename) + '.vti'):
+#		os.remove('./Shapes/' + str(filename) + '.vti')
+#		time.sleep(0.4)
+	file = '/home/eadom/Grasp-Metrics/Shapes/' + str(filename) + '.obj'
+	print file
+	call(["./SDFGen", file, str(grid_size), str(padding)])
+
+def STLtoPLY(filename):
+	reader = vtk.vtkSTLReader()
+	writer = vtk.vtkPLYWriter()
+	reader.SetFileName('./Shapes/' + filename + '.stl')
+	writer.SetFileName('./Shapes/' + filename + '.ply')
+	writer.SetInputConnection(reader.GetOutputPort())
+	writer.Write()
+
+def createPointCloud(filename):
+	STLtoPLY(filename)
+	filePly = './Shapes/' + filename
+	command = "python3 point_sampler.py " + filePly + " obj"
+	print command
+	call(command.split()) #need to use ply file for point_sampler.py, find a way to save obj/stl as ply
+	pcd = numpy.loadtxt('./Shapes/' + filename + '.out', dtype=float)
+	pcd = list(numpy.reshape(pcd, (-1,3)))
+	return pcd
+
+def adjustTransform(env, item, transform):
+	while env.CheckCollision(item):
+		transform[2][3] += 0.01
+		item.SetTransform(transform)
+	transform[2][3] += 0.02
+	return transform
+
 
 def collectData():
+	directory = './' + str(int(time.time())) + '/'
+	os.mkdir(directory, 0755)
 	shapes = ['cube', 'ellipse', 'cylinder', 'cone']
 	eng = matlab.engine.start_matlab()
 	eng.cd(r'/home/eadom/NearContactStudy/ShapeGenerator/',nargout=0)
 	env = openravepy.Environment()
+	env.SetViewer('qtcoin')
 	robot = loadRobot(env)
-
+	iter = 0
+	viewer = env.GetViewer()
 	for shape in shapes:
-		parameterShape = generateParameters(shape, 50)
+		parameterShape = generateParameters(shape)
 		for parameters in parameterShape:
-			print parameters
 			item, filename = loadObject(env, eng, shape, parameters)
-			transforms = sample_obj_transforms()
+			item.SetVisible(0)
+			pointCloud = createPointCloud(filename)
+			print filename
+			generateSDF(filename, 0.005, 70)
+			transforms = sample_obj_transforms(env, item)
 			for transform in transforms:
-				print transform
+				viewer.SetTitle("Iteration" + str(iter))
 				item.SetTransform(transform)
-				meshUntransformed = mesh.Mesh.from_file(filename + '.stl')
-				meshUntransformed.transform(transform)
-				meshUntransformed.save(filename + '.stl', mode=stl.Mode.ASCII)
-				generateSDF(filename, 0.001, 0)
-				generateHandFeatures(filename + '.out', robot, item, filename)
-				env.Save(filename + '.dae')
+				generateHandFeatures(env, directory + filename + str(iter), robot, item, filename, transform, pointCloud)
+				env.Save(directory + filename + '_' + str(iter) + '.dae')
+				iter += 1
 			env.Remove(env.GetBodies()[1])

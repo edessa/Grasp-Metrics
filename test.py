@@ -31,20 +31,67 @@ def sampleCone(obj_transform, hand_transform, sample_rate, radiusA, radiusB, ang
         transforms.append(T_world_hand)
     return transforms
 
+class PlotSpinner(threading.Thread):
+    def __init__(self,handle):
+        threading.Thread.__init__(self)
+        self.starttime = time.time()
+        self.handle=handle
+        self.ok = True
+    def run(self):
+        while self.ok:
+            self.handle.SetShow(bool(mod(time.time()-self.starttime,2.0) < 1.0))
+
+
+
 eng = matlab.engine.start_matlab()
 eng.cd(r'/home/eadom/NearContactStudy/ShapeGenerator/',nargout=0)
 parameters = [0.1, 0.050000000000000003, 0.1, 10, 0, 10]
 type = 'cube'
 ret = eng.generateShapes(type, parameters, nargout=1)
+
+import openravepy
+import numpy
+import threading
+import time
+T = numpy.array([[ 0.98232732, -0.14927452,  0.11291656, -0.05], [ 0.1317587,   0.97997794,  0.14927452,  0.  ], [-0.13293862, -0.1317587, 0.98232732,  0.05 ], [ 0. , 0.  ,0.  ,1. ]])
+
 env = openravepy.Environment()
-env.Load('/home/eadom/NearContactStudy/ShapeGenerator/Shapes/cone_h25_w25_e25_a10.stl')
+env.Load('./Shapes/cube_h5_w5_e5.stl')
 env.Load('/home/eadom/Grasp-Metrics/barretthand.robot.xml')
+point = numpy.array([0.02, 0.02, 0.3])
+handles = []
+item = env.GetBodies()[0]
+T = numpy.eye(4)
+T[2][3] = 0.2
+item.SetTransform(T)
+env.SetViewer('qtcoin')
+handles.append(env.drawarrow(p1=[0,0,0], p2 = [1,1,1], linewidth=0.01, color=[1.0, 0.0, 0.0]))
+spinner = PlotSpinner(handles[-1])
+spinner.start()
+env.plot3(points=point, pointsize=15.0)
+
+
+def plotPoints(grid):
+    handles = []
+    handles.append(env.plot3(points=point, pointsize=0.001, colors=numpy.array(((0,1,0))), drawstyle=1))
+    return handles
+
+
 robot = env.GetBodies()[1]
 item = env.GetBodies()[0]
 T = numpy.eye(4)
-T[2][3] = -0.3
-obot.SetTransform(T)
+T[2][3] = 0.2
+item.SetTransform(T)
 
+filename = '/home/eadom/Grasp-Metrics/Shapes/cube_h5_w10_e10.vti'
+r = vtk.vtkXMLImageDataReader()
+r.SetFileName(filename)
+r.Update()
+data = r.GetOutput()
+data.GetDataDimension()
+data.ComputeBounds()
+data.GetExtent()
+data.GetSpacing()
 
 
 
