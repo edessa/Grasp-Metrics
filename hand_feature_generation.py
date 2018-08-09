@@ -4,12 +4,13 @@ import math
 import time
 import ast
 import pylab
-import get_skew_data
+import get_data
 import vtk
 import matlab.engine
 from pathlib import Path
 import itertools
 from scipy import spatial
+from graspit_commander.graspit_exceptions import InvalidRobotPoseException
 
 handles = []
 
@@ -242,7 +243,7 @@ def transformPointCloud(transform, pointCloudObj):
 		transformedPointCloud.append(transformedPoint)
 	return transformedPointCloud
 
-def plotPoints(env, grid, obj_pts):
+def plotPoints(env, grid):
     handles = []
     pointGrid = []
     for i in range(0, len(grid)):
@@ -251,8 +252,8 @@ def plotPoints(env, grid, obj_pts):
 
     handles.append(env.plot3(points=numpy.array(pointGrid), pointsize=0.001, colors=numpy.array(((0,1,0))), drawstyle=1))
 
-    for i in range(0, len(obj_pts)):
-        handles.append(env.drawarrow(p1=pointGrid[i], p2 = obj_pts[i], linewidth=0.001, color=[1.0, 0.0, 0.0]))
+    #for i in range(0, len(obj_pts)):
+    #    handles.append(env.drawarrow(p1=pointGrid[i], p2 = obj_pts[i], linewidth=0.001, color=[1.0, 0.0, 0.0]))
 
     return handles
 
@@ -335,29 +336,18 @@ def alignmentDistance(env, robot, item):
 
 	return iterContactLeft, iterContactRight
 
-def generateHandFeatures(env, filename, robot, item, item_name, transformObj, pointCloudObj):
+def generateHandFeatures(env, gc, filename, robot, item, item_name, transformObj, pointCloudObj, points_in_hand_plane):
 	global handles
 	transformedPointCloud = transformPointCloud(transformObj, pointCloudObj)
 	print transformObj
 	tree = spatial.cKDTree(transformedPointCloud)
-
-	robot_hand_verts = getRobotVerts(robot)
-	hand_points = getManuallyLabelledPoints()
-
-	point_verts = []
-	for i in range(0, len(hand_points)):
-		point_verts.append(ast.literal_eval(hand_points[hand_points.keys()[i]]))
-
+	handles = plotPoints(env, points_in_hand_plane)
 
 	#surface_norms, centerRet = getBarryPoints(robot_hand_verts, point_verts)
 
 #	print centerRet
 #	print surface_norms
 #	print hand_points.keys()
-
-	centerRet = numpy.array([[0.128, 0.025, 0.115], [0.0882787, 0.0254203, 0.104], [0.0, 0.0, 0.09496], [0.128, -0.0246, 0.116], [0.0889559, -0.0254208,  0.104], [-0.0894092, 0.00154199, 0.1048],[-0.128, 0,  0.117]])
-	surface_norms = numpy.array([[-0.707,  0.00799337, 0.707], [0,  0.  ,  1], [0, 0, 1], [-0.707,  0.00799337, 0.707], [0, 0, 1], [0, 0, 1], [ 0.707, -0.00799337, 0.707]])
-	points_in_hand_plane = getGridOnHand(robot, hand_points.keys(), centerRet, surface_norms)
 
 #	print points_in_hand_plane
 	center = bounding_box(item)
@@ -386,23 +376,10 @@ def generateHandFeatures(env, filename, robot, item, item_name, transformObj, po
 			#point = [0,0, 0.2]
 			point_world_to_obj = transformPoint(numpy.linalg.inv(transformObj), point)[0:3]
 			point_transformed = transformPoint(offset_transform, point_world_to_obj)[0:3]
-		#	point_transformed = transformPoint(nump132307y.matmul(offset_transform, numpy132307.linalg.inv(transformObj)), point)[0:3]
-		#	print "offset transform"
-		#	print offset_transform
-		#	print "inverse of transformed object"
-		#	print numpy.linalg.inv(transformObj)
-		#	print numpy.matmul(offset_transform, numpy.linalg.inv(transformObj))
+
 			index1 = int(extent[1] * (point_transformed[0] - lower_bound[0])/(upper_bound[0] - lower_bound[0]))
 			index2 = int(extent[3] * (point_transformed[1] - lower_bound[1])/(upper_bound[1] - lower_bound[1]))
 			index3 = int(extent[5] * (point_transformed[2] - lower_bound[2])/(upper_bound[2] - lower_bound[2]))
-		#	print "extents"
-		#	print extent
-		#	print "indexing"
-	#		print index1, index2, index3
-	#		print "transformed point"
-	#		print point_transformed
-		#	print "point world_to_obj"
-		#	print point_world_to_obj
 
 	#		print
 			if index1 > extent[1]:
@@ -444,19 +421,31 @@ def generateHandFeatures(env, filename, robot, item, item_name, transformObj, po
 		distances.append(distance_link)
 
 
-	handles = plotPoints(env, points_in_hand_plane, obj_pts)
-	plotObject(env, transformedPointCloud)
+	#plotObject(env, transformedPointCloud)
+
 
 	print "Saved grasp metric matrice"
 	numpy.savetxt(filename + '.out', distances, delimiter=',', fmt='%s')
 	numpy.savetxt(filename + '_error' + '.out', errors, delimiter=',', fmt='%s')
 
-	alignment_label_joints = alignmentJoints(env, robot, item)
-	robot.SetDOFValues([0]*4, [0, 1, 2, 3])
-	alignment_label_dist = alignmentDistance(env, robot, item)
-	robot.SetDOFValues([0]*4, [0, 1, 2, 3])
+	#alignment_label_joints = alignmentJoints(env, robot, item)
+	#robot.SetDOFValues([0]*4, [0, 1, 2, 3])
+	#alignment_label_dist = alignmentDistance(env, robot, item)
+	#robot.SetDOFValues([0]*4, [0, 1, 2, 3])
 
-	numpy.savetxt(filename + '_labels' + '.out', alignment_label_joints + alignment_label_dist, delimiter=',', fmt='%s')
+	gc.autoGrasp()
+	try:
+		result = gc.computeQuality()
+		volume = [result.volume]
+		epsilon = [result.epsilon]
+	except InvalidRobotPoseException:
+		volume = [0]
+		epsilon = [0]
+
+	dofs = [0, 0, 0, 0]
+	gc.forceRobotDof(dofs)
+	gc.autoOpen()
+	numpy.savetxt(filename + '_labels' + '.out', volume + epsilon, delimiter=',', fmt='%s')
 
 
 
