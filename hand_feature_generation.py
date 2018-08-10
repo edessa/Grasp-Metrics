@@ -433,19 +433,7 @@ def generateHandFeatures(env, gc, filename, robot, item, item_name, transformObj
 	#alignment_label_dist = alignmentDistance(env, robot, item)
 	#robot.SetDOFValues([0]*4, [0, 1, 2, 3])
 
-	gc.autoGrasp()
-	try:
-		result = gc.computeQuality()
-		volume = [result.volume]
-		epsilon = [result.epsilon]
-	except InvalidRobotPoseException:
-		volume = [0]
-		epsilon = [0]
 
-	dofs = [0, 0, 0, 0]
-	gc.forceRobotDof(dofs)
-	gc.autoOpen()
-	numpy.savetxt(filename + '_labels' + '.out', volume + epsilon, delimiter=',', fmt='%s')
 
 
 

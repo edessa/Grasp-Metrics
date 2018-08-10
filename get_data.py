@@ -118,11 +118,11 @@ def generateParameters(type):
 	if type == 'ellipse':
 		parameters.append([0.1, 0.1, 0.1, 0.1, 0, resolution])
 		parameters.append([0.2, 0.2, 0.2, 0.1, 0, resolution])
-		parameters.append([0.2, 0.2, 0.3, 0.1, 0, resolution])
+		#parameters.append([0.2, 0.2, 0.3, 0.1, 0, resolution])
 	if type == 'cone':
 		parameters.append([0.07, 0.07, 0.07, 30, 0, resolution])
 		parameters.append([0.15, 0.15, 0.15, 30, 0, resolution])
-		parameters.append([0.2, 0.2, 0.2, 30, 0, resolution])
+		#parameters.append([0.2, 0.2, 0.2, 30, 0, resolution])
 	if type == 'cube':
 		parameters.append([0.05, 0.05, 0.05, 0.05, 0, resolution])
 		parameters.append([0.13, 0.13, 0.13, 0.1, 0, resolution])
@@ -173,16 +173,16 @@ def getPoseMsg(transform):
 	robotPose.position.x = transform[0][3]
 	robotPose.position.y = transform[1][3]
 	robotPose.position.z = transform[2][3]
-	robotPose.orientation.x = q[0]
-	robotPose.orientation.y = q[1]
-	robotPose.orientation.z = q[2]
-	robotPose.orientation.w = q[3]
+	robotPose.orientation.x = q[1]
+	robotPose.orientation.y = q[2]
+	robotPose.orientation.z = q[3]
+	robotPose.orientation.w = q[0]
 	return robotPose
 
 def getRobotPose(transform):
 	robotPose = Pose()
 	T_init = numpy.eye(4)
-	T_init[0:3,0:3] = rotation_matrix_from_rpy(math.pi/2, math.pi, 0)
+#	T_init[0:3,0:3] = rotation_matrix_from_rpy(math.pi/2, math.pi, 0)
 	T_init[2][3] = 0.0835
 	return numpy.matmul(T_init, transform)
 
@@ -192,25 +192,6 @@ def generateGaussianNoise(configuration, num_uncertainties):
     distr = numpy.random.normal(configuration, [0.005, 0.005, 0.005, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1], [num_uncertainties,10])
     return distr
 
-def get_link_transforms(robot, links):
-	transforms = []
-	for link in links:
-		transforms.append(robot.GetLink(link).GetTransform())
-	return transforms
-
-def transform_norms(original_link_transforms, noise_induced_link_transforms, surfaceNorms):
-	transformed_norms = []
-	for i in range(0, len(surfaceNorms)):
-		transformed_norms.append(transformNormal(numpy.dot(numpy.linalg.inv(noise_induced_link_transforms[i]),original_link_transforms[i]), surfaceNorms[i])[0:3])
-	return transformed_norms
-
-def transform_centers(original_link_transforms, noise_induced_link_transforms, centerRet):
-	transformed_pts = []
-	for i in range(0, len(centerRet)):
-		T = numpy.dot(numpy.linalg.inv(noise_induced_link_transforms[i]),original_link_transforms[i])
-		print T
-		transformed_pts.append(transformPoint(T, centerRet[i])[0:3])
-	return transformed_pts
 
 def collectData():
 	directory = './' + str(int(time.time())) + '/'
@@ -224,6 +205,12 @@ def collectData():
 	iter = 0
 	viewer = env.GetViewer()
 	gc = GraspitCommander()
+	hand_points = getManuallyLabelledPoints()
+	centerRet = numpy.array([[0.128, 0.025, 0.115], [0.0882787, 0.0254203, 0.104], [0.0, 0.0, 0.09496], [0.128, -0.0246, 0.116], [0.0889559, -0.0254208,  0.104], [-0.0894092, 0.00154199, 0.1048],[-0.128, 0,  0.117]])
+	surface_norms = numpy.array([[-0.707,  0.00799337, 0.707], [0, 0., 1], [0, 0, 1], [-0.707,  0.00799337, 0.707], [0, 0, 1], [0, 0, 1], [ 0.707, -0.00799337, 0.707]])
+	points_in_hand_plane = getGridOnHand(robot, hand_points.keys(), centerRet, surface_norms)
+	T_rotation = numpy.eye(4)
+	T_rotation[0:3,0:3] = rotation_matrix_from_rpy(0, 0, math.pi/2)
 	for shape in shapes:
 		parameterShape = generateParameters(shape)
 		for parameters in parameterShape:
@@ -233,46 +220,52 @@ def collectData():
 			gc.importGraspableBody('/home/eadom/Grasp-Metrics/Shapes/' + filename + '.ply')
 			robot_pose = getPoseMsg(getRobotPose(numpy.eye(4)))
 			gc.setRobotPose(robot_pose)
+			gc.setGraspableBodyPose(0, getPoseMsg(numpy.matmul(T_rotation, numpy.eye(4))))
 			item.SetVisible(1)
 			pointCloud = createPointCloud(filename)
 			print filename
-			generateSDF(filename, 0.005, 70)
+			generateSDF(filename, 0.0025, 70)
 			transforms = sample_obj_transforms(env, gc, item)
 			graspit_transform = getRobotPose(transforms)
 			for transform in transforms:
+				viewer.SetTitle("Iteration" + str(iter))
+				item.SetTransform(transform)
+				#transform[0:3,0:3] = numpy.matmul(transform[0:3,0:3], rotation_matrix_from_rpy(math.pi/2, math.pi, 0))
+				gc.setGraspableBodyPose(0, getPoseMsg(numpy.matmul(T_rotation, transform)))
+				print transform
+				print getPoseMsg(transform)
+				point_verts = []
+				for i in range(0, len(hand_points)):
+					point_verts.append(ast.literal_eval(hand_points[hand_points.keys()[i]]))
+				generateHandFeatures(env, gc, directory + filename + str(iter), robot, item, filename, transform, pointCloud, points_in_hand_plane)
+						#env.Save(directory + filename + '_' + str(iter) + '.dae')
+				iter += 1
 				configuration = [0]*10
-				noise_distr = generateGaussianNoise(configuration, 150)
-				noise_induced_transform = numpy.eye(4)
-				hand_points = getManuallyLabelledPoints()
-				robot.SetTransform(numpy.eye(4))
-				robot.SetDOFValues([0,0,0,0], [0, 1, 2, 3])
-				original_link_transforms = get_link_transforms(robot, hand_points.keys())
-				centerRet = numpy.array([[0.128, 0.025, 0.115], [0.0882787, 0.0254203, 0.104], [0.0, 0.0, 0.09496], [0.128, -0.0246, 0.116], [0.0889559, -0.0254208,  0.104], [-0.0894092, 0.00154199, 0.1048],[-0.128, 0,  0.117]])
-				surface_norms = numpy.array([[-0.707,  0.00799337, 0.707], [0, 0., 1], [0, 0, 1], [-0.707,  0.00799337, 0.707], [0, 0, 1], [0, 0, 1], [ 0.707, -0.00799337, 0.707]])
+				noise_distr = generateGaussianNoise(configuration, 300)
+				volume = epsilon = []
 				for noise in noise_distr:
-					viewer.SetTitle("Iteration" + str(iter))
+					noise_induced_transform = numpy.eye(4)
 					noise_induced_transform[0:3,3] = numpy.array(noise[0:3])
 					noise_induced_transform[0:3,0:3] = rotation_matrix_from_rpy(noise[3:6][0], noise[3:6][1], noise[3:6][2])
 					robot.SetTransform(noise_induced_transform)
-					print "Noise transform:"
-					print noise_induced_transform
 					for i in range(6, 10):
 						if noise[i] < 0:
 							noise[i] = 0
 					robot.SetDOFValues(noise[6:10], [0, 1, 2, 3])
 					if not env.CheckCollision(robot):
-						noise_induced_link_transforms = get_link_transforms(robot, hand_points.keys())
-						item.SetTransform(transform)
 						robot_pose = getPoseMsg(getRobotPose(noise_induced_transform))
 						gc.setRobotPose(robot_pose)
-						gc.setGraspableBodyPose(0, getPoseMsg(transform))
-						point_verts = []
-						for i in range(0, len(hand_points)):
-							point_verts.append(ast.literal_eval(hand_points[hand_points.keys()[i]]))
-						transformed_center_ret = transform_centers(numpy.linalg.inv(original_link_transforms), numpy.linalg.inv(noise_induced_link_transforms), centerRet)
-						transformed_surface_norms = transform_norms(numpy.linalg.inv(original_link_transforms), numpy.linalg.inv(noise_induced_link_transforms),  surface_norms)
-						points_in_hand_plane = getGridOnHand(robot, hand_points.keys(), transformed_center_ret, transformed_surface_norms)
-						generateHandFeatures(env, gc, directory + filename + str(iter), robot, item, filename, transform, pointCloud, points_in_hand_plane)
-						#env.Save(directory + filename + '_' + str(iter) + '.dae')
-						iter += 1
+						gc.forceRobotDof(noise[6:10])
+						gc.autoGrasp()
+						try:
+							result = gc.computeQuality()
+							volume += [result.volume]
+							epsilon += [result.epsilon]
+						except InvalidRobotPoseException:
+							volume += [0]
+							epsilon += [0]
+						dofs = [0, 0, 0, 0]
+						gc.forceRobotDof(dofs)
+						gc.autoOpen()
+				numpy.savetxt(directory + filename + str(iter) + '_labels' + '.out', volume + epsilon, delimiter=',', fmt='%s')
 			env.Remove(env.GetBodies()[1])
