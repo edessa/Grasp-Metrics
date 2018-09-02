@@ -11,6 +11,14 @@ from pathlib import Path
 import itertools
 from scipy import spatial
 from graspit_commander.graspit_exceptions import InvalidRobotPoseException
+from decimal import Decimal
+import fpectl
+from numpy.core.umath_tests import inner1d
+import inspect
+from CGAL.CGAL_Kernel import Point_3
+from CGAL.CGAL_Kernel import Triangle_3
+from CGAL.CGAL_Kernel import Ray_3
+from CGAL.CGAL_AABB_tree import AABB_tree_Triangle_3_soup
 
 handles = []
 
@@ -20,9 +28,19 @@ def generateGeometry(eng, type, parameters):
 	filename = eng.generateShapes(type, [float(parameters[0]), float(parameters[1]), float(parameters[2]), float(parameters[3]), float(parameters[4]), float(parameters[5])], nargout=1) #width, height, extent, alpha, min_d, resolution
 	return filename
 
-def loadRobot(env):
-	env.Load('./barretthand.robot.xml')
-	return env.GetRobots()[0]
+def loadRobot(env, handType):
+	if handType == 'Barrett':
+		env.Load('./barretthand.robot.xml')
+		T = numpy.eye(4)
+	elif handType == 'pr2_gripper':
+		env.Load('/home/eadom/Grasp-Metrics/pr2-gripper.stl')
+		T = numpy.eye(4)
+		T[0:3,0:3] = get_data.rotation_matrix_from_rpy(math.pi/2, -math.pi/2, 0)
+	else:
+		env.Load('./shadow-hand.dae')
+		T = numpy.array([[0,0,-1,0],[1,0,0,-0.08],[0,-1,0,0],[0,0,0,1]])
+	env.GetBodies()[0].SetTransform(T)
+	return env.GetBodies()[0], T
 
 def loadObject(env, eng, obj_type, parameters):
     filename = generateGeometry(eng, obj_type, parameters)
@@ -78,8 +96,13 @@ def centerItem(sdfCenter, itemCenter):
 	T[2][3] = sdfCenter[2]
 	return T
 
-def getManuallyLabelledPoints():
-	hand_points = {'handbase': '[0.0, 0.0, 0.09496]', 'Finger2-1': '[-0.0894092, 0.00154199, 0.1048]' , 'Finger2-2': '[-0.132307, 0.003609,  0.117]', 'Finger1-1': '[0.0882787, 0.0254203, 0.104]', 'Finger1-2':'[0.128, 0.025, 0.115]', 'Finger0-1' : '[0.0889559, -0.0254208,  0.104]', 'Finger0-2' : '[0.128, -0.0246, 0.116]'}
+def getManuallyLabelledPoints(handType):
+	if handType == 'Barrett':
+		hand_points = {'handbase': '[0.0, 0.0, 0.09496]', 'Finger2-1': '[-0.0894092, 0.00154199, 0.1048]' , 'Finger2-2': '[-0.132307, 0.003609,  0.117]', 'Finger1-1': '[0.0882787, 0.0254203, 0.104]', 'Finger1-2':'[0.128, 0.025, 0.115]', 'Finger0-1' : '[0.0889559, -0.0254208,  0.104]', 'Finger0-2' : '[0.128, -0.0246, 0.116]'}
+	elif handType == 'ShadowHand':
+		hand_points = {'palm': '[0.01036,0.04447,0.01607]', 'Finger0-2': '[-0.0199, 0.17334, 0.01229]', 'Finger0-1': '[-0.01986, 0.14325, 0.01448]', 'Finger0-0': '[-0.02045, 0.10678, 0.01476]', 'Finger2-1': '[0.02288, 0.15658, 0.01412]', 'Finger2-0': '[0.02184, 0.12047, 0.01482]', 'Finger2-2': '[0.02351, 0.18685, 0.01168]', 'Finger3-0': '[0.044, 0.1185, 0.01468]', 'Finger3-1': '[0.0449, 0.1529, 0.01392]', 'Finger3-2': '[0.04507, 0.18452, 0.01145]', 'Finger1-2': '[0, 0.18252, 0.01297]', 'Finger4-2': '[0.10283, 0.11211, 0.01335]', 'Finger4-1': '[0.077, 0.08721, 0.01332]', 'Finger1-0': '[0.0006, 0.11832, 0.01510]', 'Finger1-1': '[0.001, 0.15268, 0.01476]'}
+	else:
+		hand_points =  {'None':'0', 'None2':'0'}
 	return hand_points
 
 def processVTI(obj_name):
@@ -141,7 +164,6 @@ def getPlane(point, normal, radiusX, radiusY, Nx, Ny): #equation of plane is a*x
 	for y in pylab.frange(-radiusY, radiusY, deltaY): #Epsilon makes sure point count is symmetric and we don't miss points on extremes
 		for x in pylab.frange(-radiusX, radiusX, deltaX):
 			points_in_plane.append(point + x*u + y*v)
-
 	return points_in_plane
 
 def transformPoint(T, point):
@@ -150,75 +172,76 @@ def transformPoint(T, point):
 def transformNormal(T, normal):
 	return numpy.matmul(numpy.transpose(numpy.linalg.inv(T)), list(normal) + [0])
 
+def getRobotTriangles(robot):
+	triangles = []
+	for i in range(0, len(robot.GetLinks())):
+	    triangles += getTris(robot.GetLinks()[i], robot.GetTransform())
+	return verts
+
+def verticesToTriangles(verts, triangleIndices, transforms):
+    triangles = []
+    for i in range(0, len(triangleIndices)):
+        ax, ay, az = transformPoint(transforms[1], transformPoint(transforms[0], verts[triangleIndices[i][0]])[0:3])[0:3]
+        bx, by, bz = transformPoint(transforms[1], transformPoint(transforms[0], verts[triangleIndices[i][1]])[0:3])[0:3]
+        cx, cy, cz = transformPoint(transforms[1], transformPoint(transforms[0], verts[triangleIndices[i][2]])[0:3])[0:3]
+        triangles.append(Triangle_3(Point_3(ax, ay, az), Point_3(bx, by, bz), Point_3(cx, cy, cz)))
+    return numpy.array(triangles)
+
+def getTris(robot, trianglesTransformed): #ShadowHand is 1, barrett is 0
+    triangles = []
+    print trianglesTransformed
+    print robot.GetTransform()
+    for i in range(0, len(robot.GetLinks())):
+        link_geom = robot.GetLinks()[i].GetGeometries()
+	if trianglesTransformed == 1:
+		T = robot.GetTransform()
+		T[0:3,3] = [0,0,0]
+	    	transforms = [numpy.eye(4), T]
+	elif trianglesTransformed == 0:
+	    transforms = [robot.GetLinks()[i].GetTransform(), robot.GetTransform()]
+	else:
+		transforms = [numpy.eye(4), robot.GetTransform()]
+        for j in range(0, len(link_geom)):
+            link_tris = link_geom[j].GetCollisionMesh()
+	    link_verts = link_tris.vertices.tolist()
+	    for k in range(0, len(link_verts)):
+	        link_verts[k] = transformPoint((link_geom[j].GetTransform()), link_verts[k])[0:3]
+            if len(triangles) != 0:
+                triangles = numpy.concatenate((triangles, verticesToTriangles(link_verts, link_tris.indices.tolist(), transforms)), axis=0)
+            else:
+                triangles = verticesToTriangles(link_verts, link_tris.indices.tolist(), transforms)
+    if trianglesTransformed != 1:
+	return triangles
+    return triangles[3000:len(triangles)]
+
 def getGridOnHand(robot, hand_links, centerRet, surface_norms):
 	all_hand_points = []
 	#print centerRet
 	for i in range(0, len(hand_links)):
-		Tlocal = numpy.linalg.inv(robot.GetLink(hand_links[i]).GetTransform())
-		point_transformed = list(transformPoint(Tlocal, centerRet[i])[0:3])
-		#print surface_norms[i][0:3]
-		normal_transformed = list(transformNormal(Tlocal, surface_norms[i])[0:3])
-
-		if hand_links[i] == 'handbase':
-			points = getPlane(point_transformed, normal_transformed, 0.02,0.0065, 1, 1)
-		else:
-			points = getPlane(point_transformed, normal_transformed, 0.01, 0.003, 1, 1)
-		#print robot.GetLink(hand_links[i])
 		link_points = []
-		for j in range(0, len(points)):
-			point_hand_frame = [points[j][0], points[j][1], points[j][2]]
-			#print transformPoint(numpy.linalg.inv(Tlocal), point_hand_frame)[0:3]
-			link_points.append([transformPoint(numpy.linalg.inv(Tlocal), point_hand_frame)[0:3], transformNormal(numpy.linalg.inv(Tlocal), normal_transformed)[0:3]])
-		all_hand_points.append(link_points)
+		if 'None' not in hand_links:
+			Tlocal = numpy.linalg.inv(robot.GetLink(hand_links[i]).GetTransform())
+			point_transformed = list(transformPoint(Tlocal, centerRet[i])[0:3])
+			normal_transformed = list(transformNormal(Tlocal, surface_norms[i])[0:3])
 
+			points = getPlane(point_transformed, normal_transformed, 0.01, 0.005, 10, 10)
+			#print robot.GetLink(hand_links[i])
+			for j in range(0, len(points)):
+				point_hand_frame = [points[j][0], points[j][1], points[j][2]]
+				#print transformPoint(numpy.linalg.inv(Tlocal), point_hand_frame)[0:3]
+				link_points.append([transformPoint(numpy.linalg.inv(Tlocal), point_hand_frame)[0:3], transformNormal(numpy.linalg.inv(Tlocal), normal_transformed)[0:3]])
+		else:
+			points = getPlane(list(centerRet[i]), list(surface_norms[i]), 0.01, 0.01, 10, 10)
+			for j in range(0, len(points)):
+				link_points.append([points[j][0:3], list(surface_norms[i])])
+		all_hand_points.append(link_points)
 	#print len(all_hand_points)
 	return all_hand_points
 
-def getBarryPoints(handVerts, linkVerts):#call this for each point, or if loading multiple points through linkVerts
-	norms_barry_triangles = surface_norms = barry_coords = triangleBarys = centerRet  = []						 #then change return to append
-	#print len(handVerts)
-	for i in range(0, len(linkVerts)):
-		distances = centers = normals = []
-		point = linkVerts[i]
-		distances = []   #list of distances between point specified and entire hand
-		minDistance = minCenter = minNormal = 1000
-		for j in range(0, len(handVerts)):
-			hand_point = handVerts[j][0:3]
-
-			distance, center = getDistance(point, hand_point)
-			if distance < minDistance:
-				minDistance = distance
-				minCenter = hand_point
-				minNormal = handVerts[j][3:6]
-			#	print minCenter
-		centerRet = numpy.concatenate((centerRet, minCenter))
-		surface_norms = numpy.concatenate((surface_norms, minNormal))
-		#print point
-		#print minNormal
-		#print '---'
-	#	triangleBary = handTriangles[minDistanceIndex]
-		#barry_coord = getBarryCoordinates(point, triangleBary)
-		#surface_norm = (getSurfaceNormal(triangleBary)) / numpy.array(numpy.linalg.norm((getSurfaceNormal(triangleBary)))).astype(float)
-		#barry_coords.append(barry_coord)
-		#triangleBarys.append(triangleBary)
-	surface_norms = list(numpy.reshape(surface_norms, (-1,3)))
-	centerRet = list(numpy.reshape(centerRet, (-1,3)))
-	return list(surface_norms), list(centerRet)
-
 def unit_vector(vector):
-    """ Returns the unit vector of the vector.  """
     return vector / numpy.linalg.norm(vector)
 
 def angle_between(v1, v2):
-    """ Returns the angle in radians between vectors 'v1' and 'v2'::
-
-            >>> angle_between((1, 0, 0), (0, 1, 0))
-            1.5707963267948966
-            >>> angle_between((1, 0, 0), (1, 0, 0))
-            0.0
-            >>> angle_between((1, 0, 0), (-1, 0, 0))
-            3.141592653589793
-    """
     v1_u = unit_vector(v1)
     v2_u = unit_vector(v2)
     return numpy.arccos(numpy.clip(numpy.dot(v1_u, v2_u), -1.0, 1.0))
@@ -266,77 +289,29 @@ def getColl(env, links):
 			return True
 	return False
 
-def alignmentJoints(env, robot, item):
-	a = [0] * 4
-	aInd = numpy.arange(0, 4, 1)
-	leftSideColl = rightSideColl = False
-	iterContactLeft = iterContactRight = 0
-	for i in range(0, 100):
-		if leftSideColl == False:
-			a[2] += 0.01
-			robot.SetDOFValues(a, aInd)
-			leftSideColl = getColl(env, [robot.GetLinks()[8]])
-			if not leftSideColl:
-				iterContactLeft = i
-		if rightSideColl == False:
-			a[0] += 0.01
-			a[1] += 0.01
-			robot.SetDOFValues(a, aInd)
-			rightSideColl = getColl(env, [robot.GetLinks()[6]] + [robot.GetLinks()[3]])
-			if not rightSideColl:
-				iterContactRight = i
-		if leftSideColl == True and rightSideColl == True:
-			break
 
-	return iterContactLeft, iterContactRight
+def morphPoints(robot, grid, trianglesTransformed):
+	tris = getTris(robot, trianglesTransformed)
+	tree = AABB_tree_Triangle_3_soup(tris)
+	print len(tris)
+	print trianglesTransformed
+	for i in range(0, len(grid)):
+		for j in range(0, len(grid[i])):
+			#if j != 98 and j != 119 and j != 120 and j != 140 and j != 141 and j != 161 and j != 162 and j != 163:
+			if trianglesTransformed != 1 or ((i != 11 and i != 13) or (i == 11 and (j < 95 or j > 300)) or (i == 13 and j < 243)):
+				pt = grid[i][j][0]
+				point_query = Point_3(pt[0], pt[1], pt[2])
+				point_morphed = tree.closest_point(point_query)
+				if trianglesTransformed == 1:
+					grid[i][j][0] = [point_morphed.x(), point_morphed.y()-0.08, point_morphed.z()]
+				else:
+					grid[i][j][0] = [point_morphed.x(), point_morphed.y(), point_morphed.z()]
+			else:
+				grid[i][j][0] = [grid[i][j][0][0], grid[i][j][0][1]-0.08, grid[i][j][0][2]]
+	print "finished morphing"
+	return grid
 
-def alignmentDistance(env, robot, item):
-	a = [0] * 4
-	aInd = numpy.arange(0, 4, 1)
-	leftSideColl = rightSideColl = False
-	iterContactLeft = iterContactRight = 0
-	iter = 0
-
-	while a[0] < 2 and a[1] < 2 and a[2] < 2:
-		iter += 1
-		fing1RDist = fing2RDist = fing1LDist = 0
-		curFing1R = robot.GetLinks()[6].GetTransform()[0:3, 3:4]
-		curFing2R = robot.GetLinks()[3].GetTransform()[0:3, 3:4]
-		curFing1L = robot.GetLinks()[8].GetTransform()[0:3, 3:4]
-
-
-		if rightSideColl == False:
-			while fing1RDist < 0.005:
-				a[0] += 0.0001
-				robot.SetDOFValues(a, aInd)
-				fing1RDist = getDistance(curFing1R, robot.GetLinks()[6].GetTransform()[0:3, 3:4])
-			if getColl(env, [robot.GetLinks()[6]]):
-				rightSideColl = True
-				iterContactRight = iter
-
-			while fing2RDist < 0.005:
-				a[1] += 0.0001
-				robot.SetDOFValues(a, aInd)
-				fing2RDist = getDistance(curFing2R, robot.GetLinks()[3].GetTransform()[0:3, 3:4])
-			if getColl(env, [robot.GetLinks()[3]]):
-				rightSideColl = True
-				iterContactRight = iter
-
-		if leftSideColl == False:
-			while fing1LDist < 0.005:
-				a[2] += 0.0001
-				robot.SetDOFValues(a, aInd)
-				fing1LDist = getDistance(curFing1L, robot.GetLinks()[8].GetTransform()[0:3, 3:4])
-			if getColl(env, [robot.GetLinks()[8]]):
-				leftSideColl = True
-				iterContactLeft = iter
-
-		if leftSideColl == True and rightSideColl == True:
-			break
-
-	return iterContactLeft, iterContactRight
-
-def generateHandFeatures(env, gc, filename, robot, item, item_name, transformObj, pointCloudObj, points_in_hand_plane):
+def generateHandFeatures(env, gc, filename, robot, item, item_name, transformObj, pointCloudObj, points_in_hand_plane, trianglesTransformed):
 	global handles
 	transformedPointCloud = transformPointCloud(transformObj, pointCloudObj)
 	print transformObj
@@ -357,10 +332,6 @@ def generateHandFeatures(env, gc, filename, robot, item, item_name, transformObj
 
 	#print bounds
 	gx, gy, gz = numpy.gradient(field)
-	#print "sdfCenter"
-	#rint sdfCenter
-	#print "centerItem"
-	#print center
 	offset_transform = centerItem(sdfCenter, center)
 	#print offset_transform
 
