@@ -232,10 +232,11 @@ def getHandPoints(handType):
 		surface_norms = numpy.array([[-1, 0, 0], [1, 0, 0]])
 	return centerRet, surface_norms
 
-def collectData(handType):
+def collectData(handType, num):
 	directory = './' + str(handType) + '_' + str(int(time.time())) + '/'
 	os.mkdir(directory, 0755)
 	shapes = ['cube', 'ellipse', 'cylinder', 'cone']
+	shapes = [shapes[num]]
 	eng = matlab.engine.start_matlab()
 	eng.cd(r'/home/eadom/NearContactStudy/ShapeGenerator/',nargout=0)
 	env = openravepy.Environment()
@@ -244,6 +245,7 @@ def collectData(handType):
 	iter = 0
 	viewer = env.GetViewer()
 	gc = GraspitCommander()
+	GraspitCommander.GRASPIT_NODE_NAME = "/graspit" + str(num+1) + "/"
 	hand_points = getManuallyLabelledPoints(handType)
 	centerRet, surface_norms = getHandPoints(handType)
 	if handType == 'Barrett':
