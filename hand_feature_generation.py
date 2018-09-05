@@ -289,6 +289,15 @@ def getColl(env, links):
 			return True
 	return False
 
+def getRays(point, jacobi_xyz, n_rays, wedge_angle):
+	rays = []
+	for angle in pylab.frange(-wedge_angle, wedge_angle+0.001, 2.0*wedge_angle/n_rays):
+		T_wedge = numpy.eye(4)
+		T_wedge[0:3,0:3] = get_data.rotation_matrix_from_rpy(0, angle, 0)
+        	ray_normal = transformNormal(T_wedge, jacobi_xyz)[0:3]
+		ray = numpy.array([point[0], point[1], point[2], ray_normal[0], ray_normal[1], ray_normal[2]])
+		rays.append(ray)
+	return rays
 
 def morphPoints(robot, grid, trianglesTransformed):
 	tris = getTris(robot, trianglesTransformed)
@@ -311,12 +320,13 @@ def morphPoints(robot, grid, trianglesTransformed):
 	print "finished morphing"
 	return grid
 
-def generateHandFeatures(env, gc, filename, robot, item, item_name, transformObj, pointCloudObj, points_in_hand_plane, trianglesTransformed):
+def generateHandFeatures(env, gc, filename, robot, item, item_name, transformObj, pointCloudObj, points_in_hand_plane, trianglesTransformed, wedge_angle, num_rays):
 	global handles
+	handles = []
 	transformedPointCloud = transformPointCloud(transformObj, pointCloudObj)
 	print transformObj
 	tree = spatial.cKDTree(transformedPointCloud)
-	handles = plotPoints(env, points_in_hand_plane)
+	#handles = plotPoints(env, points_in_hand_plane)
 
 	#surface_norms, centerRet = getBarryPoints(robot_hand_verts, point_verts)
 
@@ -336,11 +346,13 @@ def generateHandFeatures(env, gc, filename, robot, item, item_name, transformObj
 	#print offset_transform
 
 	distances = [[]]
+	rayDistances = [[]]
 	errors = []
 	obj_pts = []
 
 	for i in range(0, len(points_in_hand_plane)):
 		distance_link = []
+		ray_distance_link = []
 		for j in range(0, len(points_in_hand_plane[i])):
 			point = points_in_hand_plane[i][j][0]
 			normal = points_in_hand_plane[i][j][1]
@@ -351,26 +363,6 @@ def generateHandFeatures(env, gc, filename, robot, item, item_name, transformObj
 			index1 = int(extent[1] * (point_transformed[0] - lower_bound[0])/(upper_bound[0] - lower_bound[0]))
 			index2 = int(extent[3] * (point_transformed[1] - lower_bound[1])/(upper_bound[1] - lower_bound[1]))
 			index3 = int(extent[5] * (point_transformed[2] - lower_bound[2])/(upper_bound[2] - lower_bound[2]))
-
-	#		print
-			if index1 > extent[1]:
-				print "failed"
-				index1 = extent[1]
-			if index1 < 0:
-				print "failed"
-				index1 = 0
-			if index2 > extent[3]:
-				print "failed"
-				index2 = extent[3]
-			if index2 < 0:
-				print "failed"
-				index2 = 0
-			if index3 > extent[5]:
-				print "failed"
-				index3 = extent[5]
-			if index3 < 0:
-				print "failed"
-				index3 = 0
 
 			ground_truth_pt = tree.query(point)[0]
 	#		print "debugging distance"
@@ -389,6 +381,20 @@ def generateHandFeatures(env, gc, filename, robot, item, item_name, transformObj
 			angle_between_norms = angle_between(normal, normal_grid_vector)
 			distance_link.append([signed_distance_function_distance, angle_between_norms])
 
+			ray_distances = []
+			ray_pos = numpy.array(point) + 0.005*numpy.array(normal)
+			rays = getRays(ray_pos, normal, num_rays, wedge_angle)
+			collision, info = env.CheckCollisionRays(numpy.array(rays), item)
+			collision_pts = info[:,0:3]
+			for coll_pt in collision_pts:
+				if coll_pt[0] == 0:
+					ray_distances.append(-1)
+				else:
+					handles.append(env.drawarrow(p1=coll_pt, p2 = point, linewidth=0.001, color=[1.0, 0.0, 0.0]))
+					ray_distances.append(math.sqrt((coll_pt[0]-point[0])**2 + (coll_pt[1] - point[1])**2 + (coll_pt[2] - point[2])**2))
+			ray_distance_link.append(ray_distances)
+
+		rayDistances.append(ray_distance_link)
 		distances.append(distance_link)
 
 
@@ -397,6 +403,7 @@ def generateHandFeatures(env, gc, filename, robot, item, item_name, transformObj
 
 	print "Saved grasp metric matrice"
 	numpy.savetxt(filename + '.out', distances, delimiter=',', fmt='%s')
+	numpy.savetxt(filename + '_ray.out', rayDistances, delimiter=',', fmt='%s')
 	numpy.savetxt(filename + '_error' + '.out', errors, delimiter=',', fmt='%s')
 
 	#alignment_label_joints = alignmentJoints(env, robot, item)

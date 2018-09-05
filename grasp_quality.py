@@ -1,4 +1,12 @@
-cd gras()
+cd graspit_ros_ws
+source devel/setup.bash
+roslaunch graspit_interface graspit_interface.roslaunch
+
+import numpy
+from graspit_commander import GraspitCommander
+from geometry_msgs.msg import Pose
+
+gc = GraspitCommander()
 gc.importRobot('ShadowHand')
 gc.autoGrasp(0)
 
@@ -12,7 +20,7 @@ T[2][3] = 0.023
 objPose = Pose()
 objPose.position.x = 0
 objPose.position.y = 0
-objPose.position.z = 0
+objPose.position.z = 0.05
 objPose.orientation.x = q[0]
 objPose.orientation.y = q[1]
 objPose.orientation.z = q[2]

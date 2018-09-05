@@ -1,7 +1,6 @@
 import openravepy
 import numpy
 from scipy import spatial
-from points_bounding_box import *
 import math
 from hand_feature_generation import *
 import random
@@ -240,12 +239,14 @@ def collectData(handType, num):
 	eng = matlab.engine.start_matlab()
 	eng.cd(r'/home/eadom/NearContactStudy/ShapeGenerator/',nargout=0)
 	env = openravepy.Environment()
+	collisionChecker = openravepy.RaveCreateCollisionChecker(env,'ode')
+	env.SetCollisionChecker(collisionChecker)
 	env.SetViewer('qtcoin')
 	robot, init_transform = loadRobot(env, handType)
 	iter = 0
 	viewer = env.GetViewer()
 	gc = GraspitCommander()
-	GraspitCommander.GRASPIT_NODE_NAME = "/graspit" + str(num+1) + "/"
+	#GraspitCommander.GRASPIT_NODE_NAME = "/graspit/"# + str(num+1) + "/"
 	hand_points = getManuallyLabelledPoints(handType)
 	centerRet, surface_norms = getHandPoints(handType)
 	if handType == 'Barrett':
@@ -277,7 +278,6 @@ def collectData(handType, num):
 			print filename
 			generateSDF(filename, 0.0025, 70)
 			transforms = sample_obj_transforms(env, gc, item, handType)
-			print transforms
 			graspit_transform = getRobotPose(transforms, handType)
 			for transform in transforms:
 				viewer.SetTitle("Iteration" + str(iter))
@@ -286,13 +286,15 @@ def collectData(handType, num):
 				gc.setGraspableBodyPose(0, getPoseMsg(numpy.matmul(T_rotation, transform)))
 				print transform
 				print getPoseMsg(transform)
-				generateHandFeatures(env, gc, directory + filename + str(iter), robot, item, filename, transform, pointCloud, points_in_hand_plane, trianglesTransformed)
+				generateHandFeatures(env, gc, directory + filename + str(iter), robot, item, filename, transform, pointCloud, points_in_hand_plane, trianglesTransformed, math.pi/6, 30)
 						#env.Save(directory + filename + '_' + str(iter) + '.dae')
 				configuration = [0]*(6 + numJoints)
 				noise_std = [0.005, 0.005, 0.005, 0.1, 0.1, 0.1] + [0.1] * numJoints
 				noise_distr = generateGaussianNoise(handType, configuration, noise_std, 100)
 		#		volume = epsilon = []
 				epsilon = []
+				contacts = []
+
 				for noise in noise_distr:
 					noise_induced_transform = numpy.eye(4)
 					noise_induced_transform[0:3,3] = numpy.array(noise[0:3])
@@ -321,11 +323,19 @@ def collectData(handType, num):
 							gc.approachToContact()
 						gc.autoGrasp()
 						time.sleep(0.5)
+						g_contacts = []
 						try:
+							r = gc.getRobot(0)
+							contact = r.robot.contacts
+							for c in contact:
+								point = c.ps.pose.position
+								pose = c.ps.pose.orientation
+								g_contacts.append([point.x, point.y, point.z, pose.x, pose.y, pose.z, pose.w])
 							result = gc.computeQuality()
 						#	volume += [result.volume]
 							print result.epsilon
 							epsilon += [result.epsilon]
+							contacts.append(g_contacts)
 						except InvalidRobotPoseException:
 						#	volume += [0]
 							epsilon += [0]
@@ -341,7 +351,9 @@ def collectData(handType, num):
 				gc.setRobotPose(robot_pose)
 				if handType != "pr2_gripper":
 					robot.SetDOFValues([0]*len(robot.GetActiveDOFValues()), numpy.arange(0, len(robot.GetActiveDOFValues())))
-				numpy.savetxt(directory + filename + str(iter) + '_labels' + '.out', epsilon, delimiter=',', fmt='%s')
+				numpy.savetxt(directory + filename + str(iter) + '_epsi_labels' + '.out', epsilon, delimiter=',', fmt='%s')
+				numpy.savetxt(directory + filename + str(iter) + '_cont_labels' + '.out', contacts, delimiter=',', fmt='%s')
+
 				iter += 1
 
 			env.Remove(env.GetBodies()[1])
