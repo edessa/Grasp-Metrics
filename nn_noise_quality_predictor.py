@@ -4,6 +4,15 @@ import os
 import math
 import glob
 import random
+from ast import literal_eval
+import tflearn
+from tflearn.layers.core import input_data, dropout, fully_connected
+from tflearn.layers.conv import conv_2d, max_pool_2d
+from tflearn.layers.estimator import regression
+from tflearn.metrics import Accuracy
+from tflearn.data_preprocessing import ImagePreprocessing
+from tflearn.data_augmentation import ImageAugmentation
+tf.reset_default_graph()
 
 
 def getFilenames(base_directory):
@@ -34,133 +43,65 @@ def stripLine(fname):
     file.close()
 
 def getLabel(labelFilename):
-    volume_labels = np.genfromtxt(labelFilename, delimiter=",")[0::2]
-    average = np.average(volume_labels)
+    eps_labels = np.genfromtxt(labelFilename, delimiter=",")
+    for i in range(0, len(eps_labels)):
+        if eps_labels[i] == -1:
+            eps_labels[i] = 0
+    average = np.average(eps_labels)
     return [average]
 
-def parseData(base_directory):
+def parseData(base_directory, n_pads):
     matrices = []
     labels = []
     numAligned = 0.0
     matricesFname, labelsFname = getFilenames(base_directory)
     maxVal = -1.0
     for i in range(0, len(labelsFname)):
-        with open(matricesFname[i], 'r') as my_file:
-            text = my_file.read()
-            text = text.replace("[", " ")
-            text = text.replace("]", " ")
-            text = text.replace(",", " ")
-            text = text.replace("\n", " ")
-            matrix = np.array(text.split()).astype(np.float)[0::2] #Filter normals
+        try:
+            matrixToAppend = []
+            matrix = np.genfromtxt(matricesFname[i], delimiter='\n', dtype='unicode') #Filter normals
         #    matrix = np.array(list(matrix)[0:54] + list(matrix)[54:63]) backward selection stuff
             #matrix = np.array(text.split()).astype(np.float) #Filter normals
-            maxM = max(matrix)
-            if maxM > maxVal:
-                maxVal = maxM
-
-        matrices.append(matrix)
-        label = getLabel(labelsFname[i])
-        labels.append(label)
+            for j in range(1, len(matrix)): #skip first empty [] in matrix
+                np_mat = np.array(literal_eval(matrix[j])).flatten()[0::2]
+                np_mat = np.reshape(np_mat, (-1, 21, 21))
+                matrixToAppend.append(np_mat)
+            matrices.append(matrixToAppend)
+            label = getLabel(labelsFname[i])
+            labels.append(label)
+        except IOError:
+            continue
     return matrices, labels
 
+def CNN(trainInputs, trainLabels, valInputs, valLabels, epochs, n_grid):
+    acc = Accuracy()
+    cnn = input_data(shape=[None, 21, 21, n_grid])
+    cnn = conv_2d(cnn, 128, 5, strides=1, activation='relu', name='conv1')
+    cnn = max_pool_2d(cnn, 2, strides=2)
+    cnn = conv_2d(cnn, 64, 3, strides=1, activation='relu', name='conv2')
+    cnn = conv_2d(cnn, 64, 3, strides=1, activation='relu', name='conv3')
+    cnn = max_pool_2d(cnn, 2, strides=2)
+    cnn = fully_connected(cnn, 1)
+    cnn = regression(cnn, optimizer='adam', loss='mean_square', learning_rate=0.001, metric='R2')
+    model = tflearn.DNN(cnn)
+    #model.fit(trainInputs, trainLabels, n_epoch=epochs, shuffle=True, validation_set=(valInputs, valLabels), show_metric=True, run_id='cnn')
+    model.fit(trainInputs, trainLabels, n_epoch=epochs, show_metric=True, run_id='cnn')
 
-def NN(matrices, labels, hidden_nodes_1, hidden_nodes_2, num_iters):
-    lRate = 0.01
-    loss_plot = []
-    matrices = np.array(matrices)
-
-    tf.reset_default_graph()
-    X = tf.placeholder(shape=(None, len(matrices[0])), dtype=tf.float64, name='X')
-    y = tf.placeholder(shape=(None, 1), dtype=tf.float64, name='y')
-
-    W1 = tf.Variable(np.random.rand(len(matrices[0]), hidden_nodes_1), dtype=tf.float64)
-    W2 = tf.Variable(np.random.rand(hidden_nodes_1, hidden_nodes_2), dtype=tf.float64)
-    W3 = tf.Variable(np.random.rand(hidden_nodes_2, 1), dtype=tf.float64)
-
-
-    # Create the neural net graph
-    #A1 = tf.sigmoid(tf.matmul(X, W1))
-    #y_est = tf.sigmoid(tf.matmul(A1, W2))
-    A1 = tf.nn.sigmoid(tf.matmul(X, W1))
-    A2 = tf.nn.sigmoid(tf.matmul(A1, W2))
-    y_est = tf.nn.sigmoid(tf.matmul(A2, W3))
-#    y_est = tf.matmul(A1, W2)
-
-
-    # Define a loss function
-    deltas = tf.square(y_est - y)
-    loss = tf.reduce_sum(deltas)
-
-    # Define a train operation to minimize the loss
-#    optimizer = tf.train.GradientDescentOptimizer(lRate)
-    optimizer = tf.train.AdamOptimizer(learning_rate=lRate)
-#    optimizer = tf.train.MomentumOptimizer(lRate,momentum=0.005)
-    train = optimizer.minimize(loss)
-
-    # Initialize variables and run session
-    init = tf.global_variables_initializer()
-    sess = tf.Session()
-    sess.run(init)
-
-    # Go through num_iters iterations
-    for i in range(num_iters):
-        sess.run(train, feed_dict={X: matrices, y: labels})
-        loss_plot.append(sess.run(loss, feed_dict={X: matrices, y: labels}))
-        weights1 = sess.run(W1)
-        weights2 = sess.run(W2)
-        weights3 = sess.run(W3)
-
-    print("loss (hidden nodes 1: %d, hidden nodes 2: %d, iterations: %d learning rate: %.2f training size: %d): %.2f" % (hidden_nodes_1, hidden_nodes_2, num_iters, lRate, len(matrices), loss_plot[-1]))
-    sess.close()
-    return weights1, weights2, weights3, loss_plot
-
-def regularize(labels):
-    regularizedLabels = []
-    for label in labels:
-        pred = [0] * 4
-        maxPred = list(label).index(max(label))
-        pred[maxPred] = 1
-        regularizedLabels.append(pred)
-    return regularizedLabels
+    return model
 
 def compareOutputs(y_est_np, labels):
     return np.mean(np.abs((labels - y_est_np)))
 
-def testing(matrices, labels):
-    X = tf.placeholder(shape=(None, len(matrices[0])), dtype=tf.float64, name='X')
-    y = tf.placeholder(shape=(None, 1), dtype=tf.float64, name='y')
-    W1 = tf.Variable(weights1)
-    W2 = tf.Variable(weights2)
-    W3 = tf.Variable(weights3)
-#    A1 = tf.sigmoid(tf.matmul(X, W1))
-    A1 = tf.nn.sigmoid(tf.matmul(X, W1))
-    A2 = tf.nn.sigmoid(tf.matmul(A1, W2))
-    y_est = tf.nn.sigmoid(tf.matmul(A2, W3))
-#    y_est = tf.matmul(A1, W2)
+#Barrett: 7 padds
 
-    init = tf.global_variables_initializer()
-    with tf.Session() as sess:
-        sess.run(init)
-        y_est_np = sess.run(y_est, feed_dict={X: matrices, y: labels})
-
-    #y_est_np = np.array(regularize(y_est_np))
-    accuracy = compareOutputs(y_est_np, labels)
-    return accuracy
-
-
-
-num_training = 5000
-num_testing = 2000
-matrices, labels = parseData('/home/eadom/Grasp-Metrics/Noise_Quality_Data/')
+num_training = 5800
+num_testing = 300
+n_pads = 7 #7 for barrett, 
+matrices, labels = parseData('/home/eadom/Grasp-Metrics/Barrett_Data/', n_pads)
 print len(matrices)
 print len(labels)
-matrices = np.array(matrices)
+matrices = np.reshape(np.array(matrices)[:,:,0], (-1, 21, 21, n_pads))
 labels = np.array(labels)
 
-weights1, weights2, weights3, loss_plot = NN(matrices[0:num_training], labels[0:num_training], 40, 30, 10000)
-
-test_accuracy = testing(matrices[num_training:num_training+num_testing], labels[num_training:num_training+num_testing])
-train_accuracy = testing(matrices[0:num_training], labels[0:num_training])
-
-print "test accuracy: " + str(test_accuracy) + "%"
-print "train accuracy: " + str(train_accuracy) + "%"
+model = CNN(matrices[0:num_training], labels[0:num_training], matrices[num_training:num_testing],  labels[num_training:num_testing], 100, n_pads)
+score = model.evaluate(matrices[num_training:num_training+num_testing], labels[num_training:num_training+num_testing])

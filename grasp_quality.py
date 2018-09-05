@@ -1,11 +1,4 @@
-cd graspit_ros_ws
-source devel/setup.bash
-roslaunch graspit_interface graspit_interface.roslaunch
-
-import numpy
-from graspit_commander import GraspitCommander
-from geometry_msgs.msg import Pose
-gc = GraspitCommander()
+cd gras()
 gc.importRobot('ShadowHand')
 gc.autoGrasp(0)
 
