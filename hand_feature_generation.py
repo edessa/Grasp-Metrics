@@ -386,13 +386,14 @@ def generateHandFeatures(env, gc, filename, robot, item, item_name, transformObj
 			rays = getRays(ray_pos, normal, num_rays, wedge_angle)
 			collision, info = env.CheckCollisionRays(numpy.array(rays), item)
 			collision_pts = info[:,0:3]
-			for coll_pt in collision_pts:
-				if coll_pt[0] == 0:
-					ray_distances.append(-1)
-				else:
-					handles.append(env.drawarrow(p1=coll_pt, p2 = point, linewidth=0.001, color=[1.0, 0.0, 0.0]))
-					ray_distances.append(math.sqrt((coll_pt[0]-point[0])**2 + (coll_pt[1] - point[1])**2 + (coll_pt[2] - point[2])**2))
-			ray_distance_link.append(ray_distances)
+			if normal[1] < 0.2:
+				for coll_pt in collision_pts:
+					if coll_pt[0] == 0 and coll_pt[1] == 0 and coll_pt[2] == 0:
+						ray_distances.append(-1)
+					else:
+			#			handles.append(env.drawarrow(p1=coll_pt, p2 = point, linewidth=0.001, color=[1.0, 0.0, 0.0])) (for visualizing)
+						ray_distances.append(math.sqrt((coll_pt[0]-point[0])**2 + (coll_pt[1] - point[1])**2 + (coll_pt[2] - point[2])**2))
+				ray_distance_link.append(ray_distances)
 
 		rayDistances.append(ray_distance_link)
 		distances.append(distance_link)
@@ -402,7 +403,7 @@ def generateHandFeatures(env, gc, filename, robot, item, item_name, transformObj
 
 
 	print "Saved grasp metric matrice"
-	numpy.savetxt(filename + '.out', distances, delimiter=',', fmt='%s')
+	numpy.savetxt(filename + '_sdf.out', distances, delimiter=',', fmt='%s')
 	numpy.savetxt(filename + '_ray.out', rayDistances, delimiter=',', fmt='%s')
 	numpy.savetxt(filename + '_error' + '.out', errors, delimiter=',', fmt='%s')
 

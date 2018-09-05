@@ -241,10 +241,10 @@ def collectData(handType, num):
 	env = openravepy.Environment()
 	collisionChecker = openravepy.RaveCreateCollisionChecker(env,'ode')
 	env.SetCollisionChecker(collisionChecker)
-	env.SetViewer('qtcoin')
+	#env.SetViewer('qtcoin')
 	robot, init_transform = loadRobot(env, handType)
 	iter = 0
-	viewer = env.GetViewer()
+	#viewer = env.GetViewer()
 	gc = GraspitCommander()
 	#GraspitCommander.GRASPIT_NODE_NAME = "/graspit/"# + str(num+1) + "/"
 	hand_points = getManuallyLabelledPoints(handType)
@@ -280,7 +280,6 @@ def collectData(handType, num):
 			transforms = sample_obj_transforms(env, gc, item, handType)
 			graspit_transform = getRobotPose(transforms, handType)
 			for transform in transforms:
-				viewer.SetTitle("Iteration" + str(iter))
 				item.SetTransform(transform)
 				#transform[0:3,0:3] = numpy.matmul(transform[0:3,0:3], rotation_matrix_from_rpy(math.pi/2, math.pi, 0))
 				gc.setGraspableBodyPose(0, getPoseMsg(numpy.matmul(T_rotation, transform)))
