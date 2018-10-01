@@ -1,4 +1,4 @@
-solid Created by stlwrite.m 16-Jul-2018 18:48:44
+solid Created by stlwrite.m 13-Sep-2018 04:02:53
 facet normal NaN NaN NaN
 outer loop
 vertex 0.0000000E+00 5.0000001E-02 0.0000000E+00
@@ -18549,4 +18549,4 @@ vertex 0.0000000E+00 -5.0000001E-02 0.0000000E+00
 vertex 0.0000000E+00 -5.0000001E-02 0.0000000E+00
 endloop
 endfacet
-endsolid Created by stlwrite.m 16-Jul-2018 18:48:44
+endsolid Created by stlwrite.m 13-Sep-2018 04:02:53
